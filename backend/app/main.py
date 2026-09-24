@@ -2,12 +2,8 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from app.database import engine
-from app.models import Base
 
 app = FastAPI(title="ClipForge API")
-
-
-Base.metadata.create_all(bind=engine)
 
 
 @app.get("/")
