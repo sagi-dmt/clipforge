@@ -4,16 +4,21 @@ import {
   ArrowLeft,
   BarChart3,
   Bell,
+  CheckCircle2,
   ChevronDown,
   Clapperboard,
+  Clock,
   Folder,
   Home,
+  Loader2,
   Plus,
   Settings,
+  Trash2,
   Upload,
   Video,
   X,
   Zap,
+  AlertCircle,
 } from "lucide-react"
 
 const API_URL = "http://localhost:8000"
@@ -26,11 +31,21 @@ type Project = {
   created_at: string
 }
 
+type TranscriptSegment = {
+  start: number
+  end: number
+  text: string
+}
+
 type VideoFile = {
   id: string
   project_id: string
   filename: string
   storage_path: string
+  processing_status: string
+  transcript: string | null
+  transcript_segments: TranscriptSegment[] | null
+  processing_error: string | null
   created_at: string
 }
 
@@ -46,29 +61,31 @@ function App() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState("")
 
-  useEffect(() => {
-    async function loadProjects() {
-      try {
-        const response = await fetch(
-          `${API_URL}/projects?user_id=${DEV_USER_ID}`
+  async function loadProjects() {
+    try {
+      setLoadingProjects(true)
+
+      const response = await fetch(
+        `${API_URL}/projects?user_id=${DEV_USER_ID}`
+      )
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load projects: ${response.status}`
         )
-
-        if (!response.ok) {
-          throw new Error(
-            `Failed to load projects: ${response.status}`
-          )
-        }
-
-        const data: Project[] = await response.json()
-
-        setProjects(data)
-      } catch (err) {
-        console.error("Failed to load projects:", err)
-      } finally {
-        setLoadingProjects(false)
       }
-    }
 
+      const data: Project[] = await response.json()
+
+      setProjects(data)
+    } catch (err) {
+      console.error("Failed to load projects:", err)
+    } finally {
+      setLoadingProjects(false)
+    }
+  }
+
+  useEffect(() => {
     loadProjects()
   }, [])
 
@@ -126,6 +143,57 @@ function App() {
     }
   }
 
+  async function deleteProject(project: Project) {
+    const confirmed = window.confirm(
+      `Delete project "${project.name}"?\n\nThis will permanently delete the project, its videos, transcripts and uploaded video files.`
+    )
+
+    if (!confirmed) return
+
+    try {
+      const response = await fetch(
+        `${API_URL}/projects/${project.id}`,
+        {
+          method: "DELETE",
+        }
+      )
+
+      if (!response.ok) {
+        let message = "Failed to delete project."
+
+        try {
+          const data = await response.json()
+
+          if (data.detail) {
+            message = data.detail
+          }
+        } catch {
+          // Ignore invalid JSON.
+        }
+
+        throw new Error(message)
+      }
+
+      setProjects((currentProjects) =>
+        currentProjects.filter(
+          (item) => item.id !== project.id
+        )
+      )
+
+      if (selectedProject?.id === project.id) {
+        setSelectedProject(null)
+      }
+    } catch (err) {
+      console.error("Failed to delete project:", err)
+
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : "Failed to delete project."
+      )
+    }
+  }
+
   function openCreateModal() {
     setProjectName("")
     setError("")
@@ -146,6 +214,7 @@ function App() {
 
   function closeProject() {
     setSelectedProject(null)
+    loadProjects()
   }
 
   if (selectedProject) {
@@ -376,16 +445,31 @@ function App() {
                 </div>
               ) : (
                 projects.map((project) => (
-                  <ProjectCard
+                  <div
                     key={project.id}
-                    name={project.name}
-                    clips={0}
-                    updated={new Date(
-                      project.created_at
-                    ).toLocaleString()}
-                    color="from-violet-500/30 to-blue-500/10"
-                    onClick={() => openProject(project)}
-                  />
+                    className="group relative"
+                  >
+                    <ProjectCard
+                      name={project.name}
+                      clips={0}
+                      updated={new Date(
+                        project.created_at
+                      ).toLocaleString()}
+                      color="from-violet-500/30 to-blue-500/10"
+                      onClick={() => openProject(project)}
+                    />
+
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        deleteProject(project)
+                      }}
+                      className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-xl border border-red-500/20 bg-black/50 text-red-400 opacity-0 backdrop-blur transition hover:bg-red-500/20 group-hover:opacity-100"
+                      title="Delete project"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 ))
               )}
             </div>
@@ -496,9 +580,16 @@ function ProjectPage({
   const [uploadError, setUploadError] = useState("")
   const [uploadSuccess, setUploadSuccess] = useState("")
 
-  async function loadVideos() {
+  const [deletingVideoId, setDeletingVideoId] =
+    useState<string | null>(null)
+
+  async function loadVideos(showLoading = false) {
     try {
-      setLoadingVideos(true)
+      // Only show the loading screen during the FIRST load.
+      // Background refreshes must not replace the video list.
+      if (showLoading) {
+        setLoadingVideos(true)
+      }
 
       const response = await fetch(
         `${API_URL}/projects/${project.id}/videos`
@@ -512,17 +603,90 @@ function ProjectPage({
 
       const data: VideoFile[] = await response.json()
 
-      setVideos(data)
+      setVideos((currentVideos) => {
+        // Avoid unnecessary React re-renders when nothing changed.
+        if (
+          JSON.stringify(currentVideos) ===
+          JSON.stringify(data)
+        ) {
+          return currentVideos
+        }
+
+        return data
+      })
     } catch (err) {
       console.error("Failed to load videos:", err)
     } finally {
-      setLoadingVideos(false)
+      if (showLoading) {
+        setLoadingVideos(false)
+      }
     }
   }
 
   useEffect(() => {
-    loadVideos()
+    // Initial load: show loading state.
+    loadVideos(true)
+
+    // Background polling: DO NOT show loading state.
+    const interval = window.setInterval(() => {
+      loadVideos(false)
+    }, 3000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
   }, [project.id])
+
+  async function deleteVideo(video: VideoFile) {
+    const confirmed = window.confirm(
+      `Delete "${video.filename}"?\n\nThis will permanently delete the uploaded video and its transcript.`
+    )
+
+    if (!confirmed) return
+
+    setDeletingVideoId(video.id)
+
+    try {
+      const response = await fetch(
+        `${API_URL}/projects/${project.id}/videos/${video.id}`,
+        {
+          method: "DELETE",
+        }
+      )
+
+      if (!response.ok) {
+        let message = "Failed to delete video."
+
+        try {
+          const data = await response.json()
+
+          if (data.detail) {
+            message = data.detail
+          }
+        } catch {
+          // Ignore invalid JSON.
+        }
+
+        throw new Error(message)
+      }
+
+      setVideos((currentVideos) =>
+        currentVideos.filter(
+          (item) => item.id !== video.id
+        )
+      )
+    } catch (err) {
+      console.error("Failed to delete video:", err)
+
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : "Failed to delete video."
+      )
+    } finally {
+      setDeletingVideoId(null)
+    }
+  }
 
   function openFilePicker() {
     if (uploading) return
@@ -548,14 +712,16 @@ function ProjectPage({
     ]
 
     const filename = file.name.toLowerCase()
-    const isAllowed = allowedExtensions.some((extension) =>
-      filename.endsWith(extension)
+
+    const isAllowed = allowedExtensions.some(
+      (extension) => filename.endsWith(extension)
     )
 
     if (!isAllowed) {
       setUploadError(
         "Unsupported video format. Please select MP4, MOV, AVI, MKV, WebM or M4V."
       )
+
       return
     }
 
@@ -567,6 +733,7 @@ function ProjectPage({
     }
 
     const formData = new FormData()
+
     formData.append("file", file)
 
     const xhr = new XMLHttpRequest()
@@ -593,15 +760,17 @@ function ProjectPage({
 
       if (xhr.status >= 200 && xhr.status < 300) {
         setUploadProgress(100)
+
         setUploadSuccess(
-          `"${file.name}" uploaded successfully.`
+          `"${file.name}" uploaded successfully. Whisper transcription has started.`
         )
 
         if (fileInputRef.current) {
           fileInputRef.current.value = ""
         }
 
-        await loadVideos()
+        // Refresh without showing the loading screen.
+        await loadVideos(false)
       } else {
         let message = "Video upload failed."
 
@@ -621,6 +790,7 @@ function ProjectPage({
 
     xhr.onerror = () => {
       setUploading(false)
+
       setUploadError(
         "Could not connect to the ClipForge backend."
       )
@@ -799,7 +969,12 @@ function ProjectPage({
 
           {loadingVideos ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-10 text-center">
-              <p className="text-sm text-zinc-500">
+              <Loader2
+                size={25}
+                className="mx-auto animate-spin text-orange-400"
+              />
+
+              <p className="mt-4 text-sm text-zinc-500">
                 Loading videos...
               </p>
             </div>
@@ -819,31 +994,14 @@ function ProjectPage({
               </p>
             </div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-4">
               {videos.map((video) => (
-                <div
+                <VideoCard
                   key={video.id}
-                  className="rounded-2xl border border-white/10 bg-[#101216] p-5 transition hover:border-orange-500/30"
-                >
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
-                      <Video size={21} />
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <h3 className="truncate font-semibold">
-                        {video.filename}
-                      </h3>
-
-                      <p className="mt-1 text-xs text-zinc-600">
-                        Uploaded{" "}
-                        {new Date(
-                          video.created_at
-                        ).toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                  video={video}
+                  deleting={deletingVideoId === video.id}
+                  onDelete={() => deleteVideo(video)}
+                />
               ))}
             </div>
           )}
@@ -877,6 +1035,267 @@ function ProjectPage({
           </div>
         </section>
       </div>
+    </div>
+  )
+}
+
+/* VIDEO CARD */
+
+function VideoCard({
+  video,
+  deleting,
+  onDelete,
+}: {
+  video: VideoFile
+  deleting: boolean
+  onDelete: () => void
+}) {
+  const [showTranscript, setShowTranscript] =
+    useState(false)
+
+  function formatTime(seconds: number) {
+    const totalSeconds = Math.floor(seconds)
+
+    const minutes = Math.floor(totalSeconds / 60)
+    const remainingSeconds = totalSeconds % 60
+
+    return `${String(minutes).padStart(2, "0")}:${String(
+      remainingSeconds
+    ).padStart(2, "0")}`
+  }
+
+  function getStatus() {
+    switch (video.processing_status) {
+      case "completed":
+        return {
+          label: "Transcription complete",
+          icon: <CheckCircle2 size={15} />,
+          className:
+            "border-green-500/20 bg-green-500/10 text-green-400",
+        }
+
+      case "processing":
+        return {
+          label: "Transcribing...",
+          icon: (
+            <Loader2
+              size={15}
+              className="animate-spin"
+            />
+          ),
+          className:
+            "border-orange-500/20 bg-orange-500/10 text-orange-400",
+        }
+
+      case "failed":
+        return {
+          label: "Processing failed",
+          icon: <AlertCircle size={15} />,
+          className:
+            "border-red-500/20 bg-red-500/10 text-red-400",
+        }
+
+      default:
+        return {
+          label: "Waiting for processing",
+          icon: <Clock size={15} />,
+          className:
+            "border-yellow-500/20 bg-yellow-500/10 text-yellow-400",
+        }
+    }
+  }
+
+  const status = getStatus()
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#101216] p-5 transition hover:border-orange-500/30">
+      {/* Header */}
+      <div className="flex items-start gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
+          <Video size={21} />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <h3 className="truncate font-semibold">
+                {video.filename}
+              </h3>
+
+              <p className="mt-1 text-xs text-zinc-600">
+                Uploaded{" "}
+                {new Date(
+                  video.created_at
+                ).toLocaleString()}
+              </p>
+            </div>
+
+            <button
+              onClick={onDelete}
+              disabled={deleting}
+              className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs font-semibold text-red-400 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deleting ? (
+                <Loader2
+                  size={14}
+                  className="animate-spin"
+                />
+              ) : (
+                <Trash2 size={14} />
+              )}
+
+              {deleting ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+
+          {/* Status */}
+          <div className="mt-4">
+            <span
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium ${status.className}`}
+            >
+              {status.icon}
+              {status.label}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Processing error */}
+      {video.processing_status === "failed" &&
+        video.processing_error && (
+          <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
+            <div className="flex gap-3">
+              <AlertCircle
+                size={17}
+                className="mt-0.5 shrink-0 text-red-400"
+              />
+
+              <div>
+                <p className="text-sm font-medium text-red-400">
+                  Whisper processing failed
+                </p>
+
+                <p className="mt-1 break-words text-xs leading-5 text-red-400/70">
+                  {video.processing_error}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* Processing */}
+      {video.processing_status === "processing" && (
+        <div className="mt-4 rounded-xl border border-orange-500/10 bg-orange-500/5 p-4">
+          <div className="flex items-center gap-3">
+            <Loader2
+              size={18}
+              className="animate-spin text-orange-400"
+            />
+
+            <div>
+              <p className="text-sm font-medium text-orange-300">
+                AI transcription in progress
+              </p>
+
+              <p className="mt-1 text-xs text-orange-400/60">
+                Whisper is analyzing the audio and generating
+                timestamped segments.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transcript */}
+      {video.processing_status === "completed" &&
+        video.transcript && (
+          <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+            <button
+              onClick={() =>
+                setShowTranscript(
+                  (current) => !current
+                )
+              }
+              className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-white/[0.03]"
+            >
+              <div>
+                <p className="text-sm font-semibold">
+                  Transcript
+                </p>
+
+                <p className="mt-1 text-xs text-zinc-600">
+                  {video.transcript_segments?.length ?? 0}{" "}
+                  timestamped segments
+                </p>
+              </div>
+
+              <ChevronDown
+                size={17}
+                className={`text-zinc-500 transition-transform ${
+                  showTranscript
+                    ? "rotate-180"
+                    : ""
+                }`}
+              />
+            </button>
+
+            {showTranscript && (
+              <div className="border-t border-white/10">
+                {/* Full transcript */}
+                <div className="p-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-600">
+                    Full transcript
+                  </p>
+
+                  <p className="text-sm leading-6 text-zinc-300">
+                    {video.transcript}
+                  </p>
+                </div>
+
+                {/* Timestamped segments */}
+                {video.transcript_segments &&
+                  video.transcript_segments.length > 0 && (
+                    <div className="border-t border-white/10">
+                      <div className="p-4">
+                        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-600">
+                          Timestamped transcript
+                        </p>
+
+                        <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+                          {video.transcript_segments.map(
+                            (segment, index) => (
+                              <div
+                                key={`${video.id}-${index}`}
+                                className="group flex gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3 transition hover:border-orange-500/20 hover:bg-orange-500/[0.02]"
+                              >
+                                <div className="shrink-0">
+                                  <span className="inline-flex items-center rounded-lg bg-orange-500/10 px-2 py-1 font-mono text-xs font-medium text-orange-400">
+                                    {formatTime(
+                                      segment.start
+                                    )}
+                                  </span>
+                                </div>
+
+                                <p className="text-sm leading-6 text-zinc-300">
+                                  {segment.text}
+                                </p>
+
+                                <span className="ml-auto hidden shrink-0 self-center font-mono text-[10px] text-zinc-700 group-hover:block">
+                                  {formatTime(
+                                    segment.end
+                                  )}
+                                </span>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+              </div>
+            )}
+          </div>
+        )}
     </div>
   )
 }
@@ -957,10 +1376,6 @@ function ProjectCard({
 
         <div className="absolute bottom-3 left-3 rounded-lg bg-black/40 px-2.5 py-1 text-xs text-zinc-300 backdrop-blur">
           {clips} clips
-        </div>
-
-        <div className="absolute right-3 top-3 rounded-lg bg-black/40 px-2.5 py-1 text-xs text-zinc-400 opacity-0 backdrop-blur transition group-hover:opacity-100">
-          Open →
         </div>
       </div>
 

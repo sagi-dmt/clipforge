@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, JSON, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -17,16 +17,19 @@ class User(Base):
         primary_key=True,
         default=lambda: str(uuid4()),
     )
+
     email: Mapped[str] = mapped_column(
         String(255),
         unique=True,
         nullable=False,
     )
+
     username: Mapped[str] = mapped_column(
         String(100),
         unique=True,
         nullable=False,
     )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
@@ -47,15 +50,18 @@ class Project(Base):
         primary_key=True,
         default=lambda: str(uuid4()),
     )
+
     user_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
+
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
     )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
@@ -85,15 +91,18 @@ class Video(Base):
         primary_key=True,
         default=lambda: str(uuid4()),
     )
+
     project_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
     )
+
     filename: Mapped[str] = mapped_column(
         String(500),
         nullable=False,
     )
+
     storage_path: Mapped[str] = mapped_column(
         String(1000),
         nullable=False,
@@ -107,6 +116,11 @@ class Video(Base):
 
     transcript: Mapped[str | None] = mapped_column(
         Text,
+        nullable=True,
+    )
+
+    transcript_segments: Mapped[list | None] = mapped_column(
+        JSON,
         nullable=True,
     )
 
@@ -134,20 +148,24 @@ class Job(Base):
         primary_key=True,
         default=lambda: str(uuid4()),
     )
+
     project_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False,
     )
+
     type: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
     )
+
     status: Mapped[str] = mapped_column(
         String(50),
         default="pending",
         nullable=False,
     )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,

@@ -17,7 +17,7 @@ def get_model():
     return _model
 
 
-def transcribe_video(video_path: str) -> str:
+def transcribe_video(video_path: str):
     model = get_model()
 
     segments, info = model.transcribe(
@@ -26,11 +26,23 @@ def transcribe_video(video_path: str) -> str:
     )
 
     transcript_parts = []
+    transcript_segments = []
 
     for segment in segments:
         text = segment.text.strip()
 
-        if text:
-            transcript_parts.append(text)
+        if not text:
+            continue
 
-    return " ".join(transcript_parts)
+        transcript_parts.append(text)
+
+        transcript_segments.append({
+            "start": round(segment.start, 2),
+            "end": round(segment.end, 2),
+            "text": text,
+        })
+
+    return {
+        "text": " ".join(transcript_parts),
+        "segments": transcript_segments,
+    }

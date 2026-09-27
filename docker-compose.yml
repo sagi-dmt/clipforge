@@ -8,6 +8,7 @@ services:
       - postgres
     environment:
       DATABASE_URL: postgresql+psycopg://clipforge:clipforge_dev_password@postgres:5432/clipforge
+      OLLAMA_URL: http://ollama:11434
     volumes:
       - ./backend:/app
       - ./uploads:/app/uploads
@@ -24,5 +25,14 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
 volumes:
   postgres_data:
+  ollama_data:
