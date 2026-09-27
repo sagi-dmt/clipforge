@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -98,6 +98,23 @@ class Video(Base):
         String(1000),
         nullable=False,
     )
+
+    processing_status: Mapped[str] = mapped_column(
+        String(50),
+        default="pending",
+        nullable=False,
+    )
+
+    transcript: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    processing_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
