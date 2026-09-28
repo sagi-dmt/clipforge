@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from "react"
 
 import {
+  AlertCircle,
   ArrowLeft,
   BarChart3,
   Bell,
@@ -18,7 +25,6 @@ import {
   Video,
   X,
   Zap,
-  AlertCircle,
 } from "lucide-react"
 
 const API_URL = "http://localhost:8000"
@@ -49,6 +55,112 @@ type VideoFile = {
   created_at: string
 }
 
+type AIClip = {
+  start: number
+  end: number
+  title: string
+  hook: string
+  reason: string
+}
+
+function formatTime(seconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0))
+
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const remainingSeconds = totalSeconds % 60
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
+      2,
+      "0"
+    )}:${String(remainingSeconds).padStart(2, "0")}`
+  }
+
+  return `${String(minutes).padStart(2, "0")}:${String(
+    remainingSeconds
+  ).padStart(2, "0")}`
+}
+
+/*
+ * Convert whatever Ollama/backend returns into the format
+ * the frontend expects.
+ */
+function normalizeAIClips(data: any): AIClip[] {
+  let clips: any[] = []
+
+  /*
+   * Supported:
+   *
+   * { clips: [...] }
+   * [...]
+   * { result: { clips: [...] } }
+   * { data: { clips: [...] } }
+   * { response: "{\"clips\":[...]}" }
+   */
+
+  if (Array.isArray(data)) {
+    clips = data
+  } else if (Array.isArray(data?.clips)) {
+    clips = data.clips
+  } else if (Array.isArray(data?.result?.clips)) {
+    clips = data.result.clips
+  } else if (Array.isArray(data?.data?.clips)) {
+    clips = data.data.clips
+  } else if (typeof data?.response === "string") {
+    try {
+      const inner = JSON.parse(data.response)
+
+      if (Array.isArray(inner)) {
+        clips = inner
+      } else if (Array.isArray(inner?.clips)) {
+        clips = inner.clips
+      }
+    } catch {
+      /*
+       * The response field was not JSON.
+       */
+    }
+  }
+
+  return clips
+    .map((clip: any) => {
+      const start = Number(clip?.start)
+      const end = Number(clip?.end)
+
+      if (
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        end <= start
+      ) {
+        return null
+      }
+
+      return {
+        start,
+        end,
+        title: String(
+          clip?.title ||
+            clip?.name ||
+            "AI Suggested Clip"
+        ),
+        hook: String(
+          clip?.hook ||
+            clip?.description ||
+            ""
+        ),
+        reason: String(
+          clip?.reason ||
+            clip?.explanation ||
+            ""
+        ),
+      }
+    })
+    .filter(Boolean) as AIClip[]
+}
+
+/* APP */
+
 function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loadingProjects, setLoadingProjects] = useState(true)
@@ -76,7 +188,6 @@ function App() {
       }
 
       const data: Project[] = await response.json()
-
       setProjects(data)
     } catch (err) {
       console.error("Failed to load projects:", err)
@@ -228,11 +339,13 @@ function App() {
 
   return (
     <div className="flex min-h-screen bg-[#08090b] text-white">
-      {/* Sidebar */}
       <aside className="hidden w-64 flex-col border-r border-white/10 bg-[#0d0f12] md:flex">
         <div className="flex h-20 items-center gap-3 border-b border-white/10 px-6">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 shadow-lg shadow-orange-500/20">
-            <Clapperboard size={20} strokeWidth={2.5} />
+            <Clapperboard
+              size={20}
+              strokeWidth={2.5}
+            />
           </div>
 
           <span className="text-xl font-bold tracking-tight">
@@ -291,7 +404,6 @@ function App() {
         </div>
       </aside>
 
-      {/* Main */}
       <main className="min-w-0 flex-1">
         <header className="flex h-20 items-center justify-between border-b border-white/10 bg-[#0a0b0d]/80 px-5 backdrop-blur-xl md:px-8">
           <div>
@@ -329,7 +441,6 @@ function App() {
         </header>
 
         <div className="mx-auto max-w-7xl p-5 md:p-8">
-          {/* Hero */}
           <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#15171b] via-[#101216] to-[#0c0d10] p-7 md:p-10">
             <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-orange-500/10 blur-3xl" />
 
@@ -364,7 +475,6 @@ function App() {
             </div>
           </section>
 
-          {/* Stats */}
           <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
               title="Projects"
@@ -387,7 +497,6 @@ function App() {
             />
           </section>
 
-          {/* Quick Upload */}
           <section className="mt-8">
             <div className="mb-4">
               <h2 className="text-xl font-semibold">
@@ -416,7 +525,6 @@ function App() {
             </div>
           </section>
 
-          {/* Projects */}
           <section className="mt-10">
             <div className="mb-5 flex items-center justify-between">
               <div>
@@ -477,7 +585,6 @@ function App() {
         </div>
       </main>
 
-      {/* Create Project Modal */}
       {showCreateModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
@@ -577,16 +684,28 @@ function ProjectPage({
 
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
+
   const [uploadError, setUploadError] = useState("")
   const [uploadSuccess, setUploadSuccess] = useState("")
 
   const [deletingVideoId, setDeletingVideoId] =
     useState<string | null>(null)
 
+  const [aiAnalysis, setAiAnalysis] =
+    useState<Record<string, AIClip[]>>({})
+
+  const [analysisCompleted, setAnalysisCompleted] =
+    useState<Record<string, boolean>>({})
+
+  const [analyzingVideoId, setAnalyzingVideoId] =
+    useState<string | null>(null)
+
+  const [analysisProgress, setAnalysisProgress] = useState(0)
+
+  const [aiError, setAiError] = useState("")
+
   async function loadVideos(showLoading = false) {
     try {
-      // Only show the loading screen during the FIRST load.
-      // Background refreshes must not replace the video list.
       if (showLoading) {
         setLoadingVideos(true)
       }
@@ -604,7 +723,6 @@ function ProjectPage({
       const data: VideoFile[] = await response.json()
 
       setVideos((currentVideos) => {
-        // Avoid unnecessary React re-renders when nothing changed.
         if (
           JSON.stringify(currentVideos) ===
           JSON.stringify(data)
@@ -624,10 +742,8 @@ function ProjectPage({
   }
 
   useEffect(() => {
-    // Initial load: show loading state.
     loadVideos(true)
 
-    // Background polling: DO NOT show loading state.
     const interval = window.setInterval(() => {
       loadVideos(false)
     }, 3000)
@@ -636,6 +752,172 @@ function ProjectPage({
       window.clearInterval(interval)
     }
   }, [project.id])
+
+  async function analyzeVideo(video: VideoFile) {
+    if (analyzingVideoId) return
+
+    setAnalyzingVideoId(video.id)
+    setAnalysisProgress(5)
+    setAiError("")
+
+    /*
+     * Clear old result while a new analysis is running.
+     * This prevents stale clips from being shown as new results.
+     */
+    setAiAnalysis((current) => {
+      const next = { ...current }
+      delete next[video.id]
+      return next
+    })
+
+    setAnalysisCompleted((current) => ({
+      ...current,
+      [video.id]: false,
+    }))
+
+    const progressTimer = window.setInterval(() => {
+      setAnalysisProgress((current) => {
+        if (current >= 90) {
+          return current
+        }
+
+        const increment =
+          current < 30
+            ? Math.random() * 6
+            : current < 70
+              ? Math.random() * 4
+              : Math.random() * 2
+
+        return Math.min(current + increment, 90)
+      })
+    }, 1000)
+
+    try {
+      console.log(
+        "[AI] Starting analysis:",
+        video.filename
+      )
+
+      const response = await fetch(
+        `${API_URL}/projects/${project.id}/videos/${video.id}/analyze`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+          },
+        }
+      )
+
+      /*
+       * Read as text first.
+       *
+       * This is important because it lets us see exactly
+       * what the backend/Ollama returned.
+       */
+      const rawText = await response.text()
+
+      console.log(
+        "[AI] RAW BACKEND RESPONSE:",
+        rawText
+      )
+
+      let data: any
+
+      try {
+        data = JSON.parse(rawText)
+      } catch {
+        throw new Error(
+          `Backend returned invalid JSON: ${rawText.slice(
+            0,
+            500
+          )}`
+        )
+      }
+
+      console.log(
+        "[AI] PARSED BACKEND RESPONSE:",
+        data
+      )
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            data?.message ||
+            `AI analysis failed: ${response.status}`
+        )
+      }
+
+      /*
+       * Convert the response into AIClip[].
+       */
+      const clips = normalizeAIClips(data)
+
+      console.log(
+        "[AI] NORMALIZED CLIPS:",
+        clips
+      )
+
+      console.log(
+        `[AI] CLIP COUNT: ${clips.length}`
+      )
+
+      if (clips.length === 0) {
+        throw new Error(
+          "Ollama completed, but the backend returned no valid clips."
+        )
+      }
+
+      /*
+       * SAVE CLIPS
+       */
+      setAiAnalysis((current) => ({
+        ...current,
+        [video.id]: clips,
+      }))
+
+      /*
+       * Mark analysis complete.
+       */
+      setAnalysisCompleted((current) => ({
+        ...current,
+        [video.id]: true,
+      }))
+
+      setAnalysisProgress(100)
+
+      console.log(
+        `[AI] Successfully stored ${clips.length} clips for video ${video.id}`
+      )
+    } catch (err) {
+      console.error(
+        "[AI] Analysis failed:",
+        err
+      )
+
+      setAiError(
+        err instanceof Error
+          ? err.message
+          : "AI analysis failed."
+      )
+
+      setAnalysisCompleted((current) => ({
+        ...current,
+        [video.id]: false,
+      }))
+
+      setAnalysisProgress(0)
+    } finally {
+      window.clearInterval(progressTimer)
+
+      /*
+       * Give React enough time to render the final result.
+       */
+      window.setTimeout(() => {
+        setAnalyzingVideoId(null)
+        setAnalysisProgress(0)
+      }, 500)
+    }
+  }
 
   async function deleteVideo(video: VideoFile) {
     const confirmed = window.confirm(
@@ -675,6 +957,18 @@ function ProjectPage({
           (item) => item.id !== video.id
         )
       )
+
+      setAiAnalysis((current) => {
+        const next = { ...current }
+        delete next[video.id]
+        return next
+      })
+
+      setAnalysisCompleted((current) => {
+        const next = { ...current }
+        delete next[video.id]
+        return next
+      })
     } catch (err) {
       console.error("Failed to delete video:", err)
 
@@ -733,7 +1027,6 @@ function ProjectPage({
     }
 
     const formData = new FormData()
-
     formData.append("file", file)
 
     const xhr = new XMLHttpRequest()
@@ -769,7 +1062,6 @@ function ProjectPage({
           fileInputRef.current.value = ""
         }
 
-        // Refresh without showing the loading screen.
         await loadVideos(false)
       } else {
         let message = "Video upload failed."
@@ -798,6 +1090,7 @@ function ProjectPage({
 
     xhr.onabort = () => {
       setUploading(false)
+
       setUploadError("Upload was cancelled.")
     }
 
@@ -805,7 +1098,7 @@ function ProjectPage({
   }
 
   function handleFileChange(
-    event: React.ChangeEvent<HTMLInputElement>
+    event: ChangeEvent<HTMLInputElement>
   ) {
     const file = event.target.files?.[0]
 
@@ -816,7 +1109,6 @@ function ProjectPage({
 
   return (
     <div className="min-h-screen bg-[#08090b] text-white">
-      {/* Top bar */}
       <header className="flex h-20 items-center justify-between border-b border-white/10 bg-[#0a0b0d]/80 px-5 backdrop-blur-xl md:px-8">
         <button
           onClick={onBack}
@@ -851,7 +1143,6 @@ function ProjectPage({
       </header>
 
       <div className="mx-auto max-w-7xl p-5 md:p-8">
-        {/* Project heading */}
         <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#15171b] via-[#101216] to-[#0c0d10] p-7 md:p-10">
           <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-orange-500/10 blur-3xl" />
 
@@ -867,12 +1158,13 @@ function ProjectPage({
 
             <p className="mt-3 text-sm text-zinc-500">
               Created{" "}
-              {new Date(project.created_at).toLocaleString()}
+              {new Date(
+                project.created_at
+              ).toLocaleString()}
             </p>
           </div>
         </section>
 
-        {/* Upload */}
         <section className="mt-8">
           <div className="mb-5">
             <h2 className="text-xl font-semibold">
@@ -955,7 +1247,32 @@ function ProjectPage({
           )}
         </section>
 
-        {/* Videos */}
+        {aiError && (
+          <div className="mt-8 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
+            <AlertCircle
+              size={18}
+              className="mt-0.5 shrink-0 text-red-400"
+            />
+
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-red-400">
+                AI analysis failed
+              </p>
+
+              <p className="mt-1 break-words text-xs leading-5 text-red-400/70">
+                {aiError}
+              </p>
+            </div>
+
+            <button
+              onClick={() => setAiError("")}
+              className="ml-auto shrink-0 text-zinc-600 transition hover:text-white"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         <section className="mt-10">
           <div className="mb-5">
             <h2 className="text-xl font-semibold">
@@ -999,15 +1316,35 @@ function ProjectPage({
                 <VideoCard
                   key={video.id}
                   video={video}
-                  deleting={deletingVideoId === video.id}
-                  onDelete={() => deleteVideo(video)}
+                  deleting={
+                    deletingVideoId === video.id
+                  }
+                  onDelete={() =>
+                    deleteVideo(video)
+                  }
+                  onAnalyze={() =>
+                    analyzeVideo(video)
+                  }
+                  analyzing={
+                    analyzingVideoId === video.id
+                  }
+                  analysisProgress={
+                    analyzingVideoId === video.id
+                      ? analysisProgress
+                      : 0
+                  }
+                  analysisCompleted={
+                    analysisCompleted[video.id] === true
+                  }
+                  aiClips={
+                    aiAnalysis[video.id] ?? []
+                  }
                 />
               ))}
             </div>
           )}
         </section>
 
-        {/* Generated Clips */}
         <section className="mt-10">
           <div className="mb-5">
             <h2 className="text-xl font-semibold">
@@ -1015,7 +1352,7 @@ function ProjectPage({
             </h2>
 
             <p className="mt-1 text-sm text-zinc-500">
-              AI-generated clips will appear here.
+              Finished MP4 clips will appear here.
             </p>
           </div>
 
@@ -1030,7 +1367,8 @@ function ProjectPage({
             </p>
 
             <p className="mt-1 text-xs text-zinc-600">
-              Upload a video and start processing to generate clips.
+              Use AI Clip Suggestions above to find moments,
+              then create the MP4 clips.
             </p>
           </div>
         </section>
@@ -1045,24 +1383,23 @@ function VideoCard({
   video,
   deleting,
   onDelete,
+  onAnalyze,
+  analyzing,
+  analysisProgress,
+  analysisCompleted,
+  aiClips,
 }: {
   video: VideoFile
   deleting: boolean
   onDelete: () => void
+  onAnalyze: () => void
+  analyzing: boolean
+  analysisProgress: number
+  analysisCompleted: boolean
+  aiClips: AIClip[]
 }) {
   const [showTranscript, setShowTranscript] =
     useState(false)
-
-  function formatTime(seconds: number) {
-    const totalSeconds = Math.floor(seconds)
-
-    const minutes = Math.floor(totalSeconds / 60)
-    const remainingSeconds = totalSeconds % 60
-
-    return `${String(minutes).padStart(2, "0")}:${String(
-      remainingSeconds
-    ).padStart(2, "0")}`
-  }
 
   function getStatus() {
     switch (video.processing_status) {
@@ -1105,11 +1442,30 @@ function VideoCard({
     }
   }
 
+  function getAnalysisStage() {
+    if (analysisProgress < 15) {
+      return "Preparing transcript..."
+    }
+
+    if (analysisProgress < 70) {
+      return "Ollama is searching for the best moments..."
+    }
+
+    if (analysisProgress < 90) {
+      return "Analyzing hooks and clip boundaries..."
+    }
+
+    if (analysisProgress < 100) {
+      return "Finishing AI analysis..."
+    }
+
+    return "Analysis complete!"
+  }
+
   const status = getStatus()
 
   return (
     <div className="rounded-2xl border border-white/10 bg-[#101216] p-5 transition hover:border-orange-500/30">
-      {/* Header */}
       <div className="flex items-start gap-4">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
           <Video size={21} />
@@ -1132,7 +1488,7 @@ function VideoCard({
 
             <button
               onClick={onDelete}
-              disabled={deleting}
+              disabled={deleting || analyzing}
               className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs font-semibold text-red-400 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {deleting ? (
@@ -1148,7 +1504,6 @@ function VideoCard({
             </button>
           </div>
 
-          {/* Status */}
           <div className="mt-4">
             <span
               className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium ${status.className}`}
@@ -1160,7 +1515,6 @@ function VideoCard({
         </div>
       </div>
 
-      {/* Processing error */}
       {video.processing_status === "failed" &&
         video.processing_error && (
           <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
@@ -1183,7 +1537,6 @@ function VideoCard({
           </div>
         )}
 
-      {/* Processing */}
       {video.processing_status === "processing" && (
         <div className="mt-4 rounded-xl border border-orange-500/10 bg-orange-500/5 p-4">
           <div className="flex items-center gap-3">
@@ -1206,7 +1559,267 @@ function VideoCard({
         </div>
       )}
 
-      {/* Transcript */}
+      {/* AI CLIP SUGGESTIONS */}
+
+      {video.processing_status === "completed" && (
+        <div className="mt-4 overflow-hidden rounded-xl border border-orange-500/20 bg-orange-500/[0.03]">
+          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Zap
+                  size={17}
+                  className="text-orange-400"
+                />
+
+                <p className="text-sm font-semibold">
+                  AI Clip Suggestions
+                </p>
+
+                {analysisCompleted && !analyzing && (
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-green-500/10 px-2 py-1 text-[10px] font-semibold text-green-400">
+                    <CheckCircle2 size={11} />
+                    Complete
+                  </span>
+                )}
+              </div>
+
+              <p className="mt-1 text-xs text-zinc-500">
+                {analyzing
+                  ? "Ollama is analyzing this video..."
+                  : aiClips.length > 0
+                    ? `${aiClips.length} AI clip suggestions found.`
+                    : analysisCompleted
+                      ? "Analysis completed, but no valid clips were returned."
+                      : "Let Ollama find the strongest moments in this video."}
+              </p>
+            </div>
+
+            <button
+              onClick={onAnalyze}
+              disabled={analyzing}
+              className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {analyzing ? (
+                <>
+                  <Loader2
+                    size={15}
+                    className="animate-spin"
+                  />
+                  Finding Clips...
+                </>
+              ) : aiClips.length > 0 ? (
+                <>
+                  <Zap size={15} />
+                  Analyze Again
+                </>
+              ) : (
+                <>
+                  <Zap size={15} />
+                  Find Clips
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* PROGRESS */}
+
+          {analyzing && (
+            <div className="border-t border-orange-500/10 px-4 py-5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500/10">
+                    <Loader2
+                      size={18}
+                      className="animate-spin text-orange-400"
+                    />
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-medium text-orange-300">
+                      Ollama is analyzing your video
+                    </p>
+
+                    <p className="mt-1 text-xs text-zinc-600">
+                      {getAnalysisStage()}
+                    </p>
+                  </div>
+                </div>
+
+                <span className="text-sm font-bold text-orange-400">
+                  {Math.round(analysisProgress)}%
+                </span>
+              </div>
+
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-500 ease-out"
+                  style={{
+                    width: `${analysisProgress}%`,
+                  }}
+                />
+              </div>
+
+              <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-700">
+                <span>Llama 3.2 3B</span>
+
+                <span>
+                  {analysisProgress < 70
+                    ? "AI inference"
+                    : "Finalizing"}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* RESULTS */}
+
+          {!analyzing && aiClips.length > 0 && (
+            <div className="border-t border-orange-500/10 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-600">
+                    Suggested Clips
+                  </p>
+
+                  <p className="mt-1 text-xs text-zinc-700">
+                    AI-selected moments from your video
+                  </p>
+                </div>
+
+                <span className="rounded-lg bg-orange-500/10 px-2 py-1 text-[10px] font-semibold text-orange-400">
+                  {aiClips.length} found
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {aiClips.map((clip, index) => (
+                  <div
+                    key={`${video.id}-ai-${index}-${clip.start}-${clip.end}`}
+                    className="rounded-xl border border-white/5 bg-white/[0.02] p-4 transition hover:border-orange-500/20 hover:bg-orange-500/[0.02]"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-[10px] font-bold text-orange-400">
+                            {index + 1}
+                          </span>
+
+                          <h4 className="text-sm font-semibold text-white">
+                            {clip.title}
+                          </h4>
+                        </div>
+
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <Clock
+                            size={13}
+                            className="text-zinc-600"
+                          />
+
+                          <span className="font-mono text-xs text-orange-400">
+                            {formatTime(clip.start)}
+                            {" – "}
+                            {formatTime(clip.end)}
+                          </span>
+
+                          <span className="text-xs text-zinc-700">
+                            (
+                            {Math.max(
+                              0,
+                              Math.round(
+                                clip.end - clip.start
+                              )
+                            )}
+                            s)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {clip.hook && (
+                      <div className="mt-3 rounded-lg bg-black/20 p-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+                          Hook
+                        </p>
+
+                        <p className="mt-1 text-xs leading-5 text-zinc-300">
+                          {clip.hook}
+                        </p>
+                      </div>
+                    )}
+
+                    {clip.reason && (
+                      <p className="mt-3 text-xs leading-5 text-zinc-500">
+                        <span className="font-semibold text-zinc-400">
+                          Why:
+                        </span>{" "}
+                        {clip.reason}
+                      </p>
+                    )}
+
+                    <div className="mt-4 flex gap-2">
+                      <button
+                        disabled
+                        className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-zinc-600"
+                        title="Clip creation will be enabled in the next step"
+                      >
+                        <Clapperboard size={13} />
+                        Create Clip
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* COMPLETED BUT EMPTY */}
+
+          {!analyzing &&
+            analysisCompleted &&
+            aiClips.length === 0 && (
+              <div className="border-t border-orange-500/10 px-4 py-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-yellow-500/10">
+                    <AlertCircle
+                      size={16}
+                      className="text-yellow-400"
+                    />
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-medium text-zinc-300">
+                      Analysis completed, but no clips were returned.
+                    </p>
+
+                    <p className="mt-1 text-xs text-zinc-600">
+                      Try Analyze Again. If this keeps happening,
+                      check the browser console and backend response.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+          {/* NOT ANALYZED */}
+
+          {!analyzing &&
+            !analysisCompleted &&
+            aiClips.length === 0 && (
+              <div className="border-t border-orange-500/10 px-4 py-4">
+                <p className="text-xs text-zinc-600">
+                  Click{" "}
+                  <span className="font-medium text-orange-400">
+                    Find Clips
+                  </span>{" "}
+                  to let Ollama analyze this transcript.
+                </p>
+              </div>
+            )}
+        </div>
+      )}
+
+      {/* TRANSCRIPT */}
+
       {video.processing_status === "completed" &&
         video.transcript && (
           <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
@@ -1232,16 +1845,13 @@ function VideoCard({
               <ChevronDown
                 size={17}
                 className={`text-zinc-500 transition-transform ${
-                  showTranscript
-                    ? "rotate-180"
-                    : ""
+                  showTranscript ? "rotate-180" : ""
                 }`}
               />
             </button>
 
             {showTranscript && (
               <div className="border-t border-white/10">
-                {/* Full transcript */}
                 <div className="p-4">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-600">
                     Full transcript
@@ -1252,7 +1862,6 @@ function VideoCard({
                   </p>
                 </div>
 
-                {/* Timestamped segments */}
                 {video.transcript_segments &&
                   video.transcript_segments.length > 0 && (
                     <div className="border-t border-white/10">
@@ -1270,9 +1879,7 @@ function VideoCard({
                               >
                                 <div className="shrink-0">
                                   <span className="inline-flex items-center rounded-lg bg-orange-500/10 px-2 py-1 font-mono text-xs font-medium text-orange-400">
-                                    {formatTime(
-                                      segment.start
-                                    )}
+                                    {formatTime(segment.start)}
                                   </span>
                                 </div>
 
@@ -1281,9 +1888,7 @@ function VideoCard({
                                 </p>
 
                                 <span className="ml-auto hidden shrink-0 self-center font-mono text-[10px] text-zinc-700 group-hover:block">
-                                  {formatTime(
-                                    segment.end
-                                  )}
+                                  {formatTime(segment.end)}
                                 </span>
                               </div>
                             )
