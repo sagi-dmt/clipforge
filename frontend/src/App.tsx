@@ -70,6 +70,9 @@ type GeneratedClip = {
   end: number
   duration: number
   url: string
+  video_id?: string
+  project_id?: string
+  created_at?: string
 }
 
 function formatTime(seconds: number) {
@@ -774,12 +777,21 @@ function ProjectPage({
   >({})
 
   const [
+    loadingGeneratedClips,
+    setLoadingGeneratedClips,
+  ] = useState(true)
+
+  const [
     creatingClip,
     setCreatingClip,
   ] = useState<{
     videoId: string
     index: number
   } | null>(null)
+
+  /*
+   * LOAD VIDEOS
+   */
 
   async function loadVideos(
     showLoading = false
@@ -824,8 +836,111 @@ function ProjectPage({
     }
   }
 
+  /*
+   * LOAD SAVED CLIPS FROM DATABASE
+   *
+   * This is the important part for persistence.
+   * Every time the project page opens, saved clips
+   * are requested from the backend.
+   */
+
+  async function loadGeneratedClips() {
+    try {
+      setLoadingGeneratedClips(true)
+
+      const response = await fetch(
+        `${API_URL}/projects/${project.id}/clips`
+      )
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load generated clips: ${response.status}`
+        )
+      }
+
+      const data: any[] =
+        await response.json()
+
+      const grouped: Record<
+        string,
+        Record<string, GeneratedClip>
+      > = {}
+
+      for (const item of data) {
+        const videoId = String(
+          item.video_id
+        )
+
+        const clipId = String(
+          item.clip_id ||
+            item.id
+        )
+
+        const generated: GeneratedClip = {
+          clip_id: clipId,
+          filename: String(
+            item.filename
+          ),
+          start: Number(
+            item.start ?? 0
+          ),
+          end: Number(
+            item.end ?? 0
+          ),
+          duration: Number(
+            item.duration ??
+              Number(item.end ?? 0) -
+                Number(item.start ?? 0)
+          ),
+          url: String(
+            item.url
+          ),
+          video_id: videoId,
+          project_id: project.id,
+          created_at:
+            item.created_at
+              ? String(
+                  item.created_at
+                )
+              : undefined,
+        }
+
+        if (!grouped[videoId]) {
+          grouped[videoId] = {}
+        }
+
+        /*
+         * Use clip_id as the database identity.
+         * This means multiple clips with the same
+         * timestamps can still exist.
+         */
+        grouped[videoId][clipId] =
+          generated
+      }
+
+      setGeneratedClips(grouped)
+
+      console.log(
+        "[ClipForge] Loaded saved clips:",
+        grouped
+      )
+    } catch (err) {
+      console.error(
+        "[ClipForge] Failed to load saved clips:",
+        err
+      )
+    } finally {
+      setLoadingGeneratedClips(false)
+    }
+  }
+
+  /*
+   * INITIAL PROJECT LOAD
+   */
+
   useEffect(() => {
     loadVideos(true)
+    loadGeneratedClips()
 
     const interval =
       window.setInterval(() => {
@@ -833,9 +948,15 @@ function ProjectPage({
       }, 3000)
 
     return () => {
-      window.clearInterval(interval)
+      window.clearInterval(
+        interval
+      )
     }
   }, [project.id])
+
+  /*
+   * AI ANALYSIS
+   */
 
   async function analyzeVideo(
     video: VideoFile
@@ -991,13 +1112,15 @@ function ProjectPage({
     }
   }
 
+  /*
+   * CREATE MP4 CLIP
+   */
+
   async function createClip(
     video: VideoFile,
     clip: AIClip,
     index: number
   ) {
-    const key = `${clip.start}-${clip.end}`
-
     setCreatingClip({
       videoId: video.id,
       index,
@@ -1066,6 +1189,14 @@ function ProjectPage({
             clip.end - clip.start
         ),
         url: String(data.url),
+        video_id: video.id,
+        project_id: project.id,
+        created_at:
+          data.created_at
+            ? String(
+                data.created_at
+              )
+            : undefined,
       }
 
       console.log(
@@ -1073,15 +1204,26 @@ function ProjectPage({
         generated
       )
 
+      /*
+       * Save it immediately in local React state
+       * so it appears without refreshing.
+       */
       setGeneratedClips(
         (current) => ({
           ...current,
           [video.id]: {
             ...(current[video.id] || {}),
-            [key]: generated,
+            [generated.clip_id]:
+              generated,
           },
         })
       )
+
+      /*
+       * Reload from the database as a final
+       * confirmation that persistence works.
+       */
+      await loadGeneratedClips()
     } catch (error) {
       console.error(
         "[ClipForge] Clip creation failed:",
@@ -1098,11 +1240,15 @@ function ProjectPage({
     }
   }
 
+  /*
+   * DELETE VIDEO
+   */
+
   async function deleteVideo(
     video: VideoFile
   ) {
     const confirmed = window.confirm(
-      `Delete "${video.filename}"?\n\nThis will permanently delete the uploaded video and its transcript.`
+      `Delete "${video.filename}"?\n\nThis will permanently delete the uploaded video, transcript and generated clips.`
     )
 
     if (!confirmed) return
@@ -1158,6 +1304,8 @@ function ProjectPage({
         delete next[video.id]
         return next
       })
+
+      await loadGeneratedClips()
     } catch (err) {
       console.error(
         "Failed to delete video:",
@@ -1173,6 +1321,10 @@ function ProjectPage({
       setDeletingVideoId(null)
     }
   }
+
+  /*
+   * UPLOAD
+   */
 
   function openFilePicker() {
     if (uploading) return
@@ -1321,6 +1473,10 @@ function ProjectPage({
 
     uploadFile(file)
   }
+
+  /*
+   * PROJECT PAGE UI
+   */
 
   return (
     <div className="min-h-screen bg-[#08090b] text-white">
@@ -1588,23 +1744,51 @@ function ProjectPage({
         </section>
 
         <section className="mt-10">
-          <div className="mb-5">
-            <h2 className="text-xl font-semibold">
-              Generated Clips
-            </h2>
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold">
+                Generated Clips
+              </h2>
 
-            <p className="mt-1 text-sm text-zinc-500">
-              Finished MP4 clips will appear here.
-            </p>
+              <p className="mt-1 text-sm text-zinc-500">
+                Finished MP4 clips saved to this project.
+              </p>
+            </div>
+
+            {!loadingGeneratedClips && (
+              <span className="rounded-lg bg-green-500/10 px-2.5 py-1.5 text-xs font-semibold text-green-400">
+                {Object.values(
+                  generatedClips
+                ).reduce(
+                  (total, clips) =>
+                    total +
+                    Object.keys(clips)
+                      .length,
+                  0
+                )}{" "}
+                saved
+              </span>
+            )}
           </div>
 
-          {Object.values(
-            generatedClips
-          ).some(
-            (videoClips) =>
-              Object.keys(videoClips)
-                .length > 0
-          ) ? (
+          {loadingGeneratedClips ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-10 text-center">
+              <Loader2
+                size={25}
+                className="mx-auto animate-spin text-green-400"
+              />
+
+              <p className="mt-4 text-sm text-zinc-500">
+                Loading saved clips...
+              </p>
+            </div>
+          ) : Object.values(
+              generatedClips
+            ).some(
+              (videoClips) =>
+                Object.keys(videoClips)
+                  .length > 0
+            ) ? (
             <div className="space-y-3">
               {Object.entries(
                 generatedClips
@@ -1642,6 +1826,15 @@ function ProjectPage({
                               )}
                               s
                             </p>
+
+                            {clip.created_at && (
+                              <p className="mt-1 text-[10px] text-zinc-700">
+                                Created{" "}
+                                {new Date(
+                                  clip.created_at
+                                ).toLocaleString()}
+                              </p>
+                            )}
                           </div>
                         </div>
 
@@ -2047,10 +2240,30 @@ function VideoCard({
                         index
                       ) => {
                         const clipKey = `${clip.start}-${clip.end}`
+
+                        /*
+                         * We now identify generated clips
+                         * by their database clip_id.
+                         */
+                        const generatedEntries =
+                          Object.values(
+                            generatedClips
+                          )
+
                         const generated =
-                          generatedClips[
-                            clipKey
-                          ]
+                          generatedEntries.find(
+                            (item) =>
+                              Math.abs(
+                                item.start -
+                                  clip.start
+                              ) <
+                                0.01 &&
+                              Math.abs(
+                                item.end -
+                                  clip.end
+                              ) <
+                                0.01
+                          )
 
                         const isCreating =
                           creatingClipIndex ===

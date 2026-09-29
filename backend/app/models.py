@@ -82,6 +82,11 @@ class Project(Base):
         cascade="all, delete-orphan",
     )
 
+    clips: Mapped[list["Clip"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+
 
 class Video(Base):
     __tablename__ = "videos"
@@ -137,6 +142,69 @@ class Video(Base):
 
     project: Mapped["Project"] = relationship(
         back_populates="videos",
+    )
+
+    clips: Mapped[list["Clip"]] = relationship(
+        back_populates="video",
+        cascade="all, delete-orphan",
+    )
+
+
+class Clip(Base):
+    __tablename__ = "clips"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid4()),
+    )
+
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    video_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("videos.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    filename: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+    )
+
+    storage_path: Mapped[str] = mapped_column(
+        String(1000),
+        nullable=False,
+    )
+
+    start_time: Mapped[float] = mapped_column(
+        nullable=False,
+    )
+
+    end_time: Mapped[float] = mapped_column(
+        nullable=False,
+    )
+
+    duration: Mapped[float] = mapped_column(
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    project: Mapped["Project"] = relationship(
+        back_populates="clips",
+    )
+
+    video: Mapped["Video"] = relationship(
+        back_populates="clips",
     )
 
 

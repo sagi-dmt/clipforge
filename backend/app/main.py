@@ -18,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, engine, get_db
-from app.models import Project, User, Video
+from app.models import Clip, Project, User, Video
 from app.whisper_service import transcribe_video
 from app.ollama_service import analyze_transcript
 
@@ -61,6 +61,29 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 class ProjectCreate(BaseModel):
     name: str
     user_id: str
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def clip_to_dict(clip: Clip):
+    return {
+        "clip_id": clip.id,
+        "id": clip.id,
+        "project_id": clip.project_id,
+        "video_id": clip.video_id,
+        "filename": clip.filename,
+        "storage_path": clip.storage_path,
+        "start": clip.start_time,
+        "end": clip.end_time,
+        "duration": clip.duration,
+        "created_at": clip.created_at,
+        "url": (
+            f"/projects/{clip.project_id}/clips/"
+            f"{clip.filename}"
+        ),
+    }
 
 
 # ============================================================
@@ -268,6 +291,23 @@ def delete_video(
     video_path = Path(video.storage_path)
 
     try:
+        # Delete generated clip files.
+        clips = (
+            db.query(Clip)
+            .filter(
+                Clip.video_id == video_id,
+                Clip.project_id == project_id,
+            )
+            .all()
+        )
+
+        for clip in clips:
+            clip_path = Path(clip.storage_path)
+
+            if clip_path.exists():
+                clip_path.unlink()
+
+        # Delete uploaded source video.
         if video_path.exists():
             video_path.unlink()
 
@@ -276,7 +316,7 @@ def delete_video(
 
         return {
             "success": True,
-            "message": "Video deleted successfully",
+            "message": "Video and generated clips deleted successfully",
             "video_id": video_id,
         }
 
@@ -287,6 +327,52 @@ def delete_video(
             status_code=500,
             detail=f"Video deletion failed: {str(e)}",
         )
+
+
+# ============================================================
+# GENERATED CLIPS - LOAD FROM DATABASE
+# ============================================================
+
+@app.get("/projects/{project_id}/clips")
+def get_project_clips(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    project = (
+        db.query(Project)
+        .filter(Project.id == project_id)
+        .first()
+    )
+
+    if not project:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found",
+        )
+
+    clips = (
+        db.query(Clip)
+        .filter(Clip.project_id == project_id)
+        .order_by(Clip.created_at.desc())
+        .all()
+    )
+
+    # Remove database records whose files no longer exist.
+    valid_clips = []
+
+    for clip in clips:
+        if Path(clip.storage_path).exists():
+            valid_clips.append(clip)
+        else:
+            db.delete(clip)
+
+    if len(valid_clips) != len(clips):
+        db.commit()
+
+    return [
+        clip_to_dict(clip)
+        for clip in valid_clips
+    ]
 
 
 # ============================================================
@@ -304,7 +390,9 @@ def process_video(video_id: str):
         )
 
         if not video:
-            print(f"[Whisper] Video not found: {video_id}")
+            print(
+                f"[Whisper] Video not found: {video_id}"
+            )
             return
 
         video.processing_status = "processing"
@@ -337,7 +425,9 @@ def process_video(video_id: str):
         )
 
     except Exception as e:
-        print(f"[Whisper] Error: {e}")
+        print(
+            f"[Whisper] Error: {e}"
+        )
 
         try:
             video = (
@@ -354,7 +444,7 @@ def process_video(video_id: str):
 
         except Exception as db_error:
             print(
-                f"[Whisper] Failed to save error: "
+                "[Whisper] Failed to save error: "
                 f"{db_error}"
             )
 
@@ -475,7 +565,9 @@ async def upload_video(
 # AI VIDEO ANALYSIS
 # ============================================================
 
-@app.post("/projects/{project_id}/videos/{video_id}/analyze")
+@app.post(
+    "/projects/{project_id}/videos/{video_id}/analyze"
+)
 def analyze_video(
     project_id: str,
     video_id: str,
@@ -545,10 +637,6 @@ def create_clip(
     end: float,
     db: Session = Depends(get_db),
 ):
-    # --------------------------------------------------------
-    # Find video
-    # --------------------------------------------------------
-
     video = (
         db.query(Video)
         .filter(
@@ -563,10 +651,6 @@ def create_clip(
             status_code=404,
             detail="Video not found",
         )
-
-    # --------------------------------------------------------
-    # Validate timestamps
-    # --------------------------------------------------------
 
     try:
         start = float(start)
@@ -604,10 +688,6 @@ def create_clip(
             detail="Clip cannot be longer than 120 seconds",
         )
 
-    # --------------------------------------------------------
-    # Source video
-    # --------------------------------------------------------
-
     source_path = Path(video.storage_path)
 
     if not source_path.exists():
@@ -618,10 +698,6 @@ def create_clip(
                 f"{source_path}"
             ),
         )
-
-    # --------------------------------------------------------
-    # Create clips directory
-    # --------------------------------------------------------
 
     clips_dir = (
         UPLOAD_DIR
@@ -634,72 +710,36 @@ def create_clip(
         exist_ok=True,
     )
 
-    # --------------------------------------------------------
-    # Output filename
-    # --------------------------------------------------------
-
     clip_id = str(uuid4())
-
     output_filename = f"{clip_id}.mp4"
 
-    output_path = (
-        clips_dir
-        / output_filename
-    )
-
-    # --------------------------------------------------------
-    # FFmpeg command
-    # --------------------------------------------------------
+    output_path = clips_dir / output_filename
 
     command = [
         "ffmpeg",
-
         "-y",
-
-        # Seek
         "-ss",
         str(start),
-
-        # Input
         "-i",
         str(source_path),
-
-        # Duration
         "-t",
         str(duration),
-
-        # Video
         "-map",
         "0:v:0",
-
-        # Audio if available
         "-map",
         "0:a?",
-
-        # H.264
         "-c:v",
         "libx264",
-
-        # Encoding speed
         "-preset",
         "veryfast",
-
-        # Quality
         "-crf",
         "23",
-
-        # Audio
         "-c:a",
         "aac",
-
         "-b:a",
         "128k",
-
-        # Web-friendly MP4
         "-movflags",
         "+faststart",
-
-        # Output
         str(output_path),
     ]
 
@@ -713,10 +753,6 @@ def create_clip(
         "[Clip] FFmpeg command:",
         " ".join(command),
     )
-
-    # --------------------------------------------------------
-    # Run FFmpeg
-    # --------------------------------------------------------
 
     try:
         result = subprocess.run(
@@ -747,33 +783,17 @@ def create_clip(
             ),
         )
 
-    # --------------------------------------------------------
-    # FFmpeg failed
-    # --------------------------------------------------------
-
     if result.returncode != 0:
-        print(
-            "[Clip] FFmpeg failed:"
-        )
-
-        print(
-            result.stderr
-        )
+        print("[Clip] FFmpeg failed:")
+        print(result.stderr)
 
         if output_path.exists():
             output_path.unlink()
 
         raise HTTPException(
             status_code=500,
-            detail=(
-                "FFmpeg failed to create "
-                "the clip."
-            ),
+            detail="FFmpeg failed to create the clip.",
         )
-
-    # --------------------------------------------------------
-    # Verify output
-    # --------------------------------------------------------
 
     if not output_path.exists():
         raise HTTPException(
@@ -783,10 +803,6 @@ def create_clip(
                 "the output file was not created."
             ),
         )
-
-    # --------------------------------------------------------
-    # Get output file size
-    # --------------------------------------------------------
 
     file_size = output_path.stat().st_size
 
@@ -809,22 +825,61 @@ def create_clip(
     )
 
     # --------------------------------------------------------
-    # Response
+    # SAVE CLIP METADATA TO DATABASE
     # --------------------------------------------------------
+
+    clip = Clip(
+        id=clip_id,
+        project_id=project_id,
+        video_id=video_id,
+        filename=output_filename,
+        storage_path=str(output_path),
+        start_time=start,
+        end_time=end,
+        duration=duration,
+    )
+
+    try:
+        db.add(clip)
+        db.commit()
+        db.refresh(clip)
+
+    except Exception as e:
+        db.rollback()
+
+        if output_path.exists():
+            output_path.unlink()
+
+        print(
+            f"[Clip] Failed to save database record: {e}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Clip was generated, but "
+                "saving it to the database failed."
+            ),
+        )
+
+    print(
+        f"[Clip] Database record saved: {clip.id}"
+    )
 
     return {
         "success": True,
-        "clip_id": clip_id,
-        "filename": output_filename,
-        "start": start,
-        "end": end,
-        "duration": duration,
+        "clip_id": clip.id,
+        "filename": clip.filename,
+        "start": clip.start_time,
+        "end": clip.end_time,
+        "duration": clip.duration,
         "size": file_size,
         "url": (
             f"/projects/"
             f"{project_id}/clips/"
-            f"{output_filename}"
+            f"{clip.filename}"
         ),
+        "created_at": clip.created_at,
     }
 
 
@@ -838,31 +893,37 @@ def create_clip(
 def get_clip(
     project_id: str,
     filename: str,
+    db: Session = Depends(get_db),
 ):
-    # Prevent path traversal
     safe_filename = Path(filename).name
 
-    clips_dir = (
-        UPLOAD_DIR
-        / project_id
-        / "clips"
+    clip = (
+        db.query(Clip)
+        .filter(
+            Clip.project_id == project_id,
+            Clip.filename == safe_filename,
+        )
+        .first()
     )
 
-    file_path = (
-        clips_dir
-        / safe_filename
-    )
+    if not clip:
+        raise HTTPException(
+            status_code=404,
+            detail="Clip not found in database",
+        )
+
+    file_path = Path(clip.storage_path)
 
     if not file_path.exists():
         raise HTTPException(
             status_code=404,
-            detail="Clip not found",
+            detail="Clip file not found",
         )
 
     if not file_path.is_file():
         raise HTTPException(
             status_code=404,
-            detail="Clip not found",
+            detail="Clip file not found",
         )
 
     return FileResponse(
