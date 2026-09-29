@@ -63,18 +63,33 @@ type AIClip = {
   reason: string
 }
 
+type GeneratedClip = {
+  clip_id: string
+  filename: string
+  start: number
+  end: number
+  duration: number
+  url: string
+}
+
 function formatTime(seconds: number) {
-  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0))
+  const totalSeconds = Math.max(
+    0,
+    Math.floor(Number(seconds) || 0)
+  )
 
   const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const minutes = Math.floor(
+    (totalSeconds % 3600) / 60
+  )
   const remainingSeconds = totalSeconds % 60
 
   if (hours > 0) {
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
-      2,
-      "0"
-    )}:${String(remainingSeconds).padStart(2, "0")}`
+    return `${String(hours).padStart(2, "0")}:${String(
+      minutes
+    ).padStart(2, "0")}:${String(
+      remainingSeconds
+    ).padStart(2, "0")}`
   }
 
   return `${String(minutes).padStart(2, "0")}:${String(
@@ -82,22 +97,8 @@ function formatTime(seconds: number) {
   ).padStart(2, "0")}`
 }
 
-/*
- * Convert whatever Ollama/backend returns into the format
- * the frontend expects.
- */
 function normalizeAIClips(data: any): AIClip[] {
   let clips: any[] = []
-
-  /*
-   * Supported:
-   *
-   * { clips: [...] }
-   * [...]
-   * { result: { clips: [...] } }
-   * { data: { clips: [...] } }
-   * { response: "{\"clips\":[...]}" }
-   */
 
   if (Array.isArray(data)) {
     clips = data
@@ -117,9 +118,7 @@ function normalizeAIClips(data: any): AIClip[] {
         clips = inner.clips
       }
     } catch {
-      /*
-       * The response field was not JSON.
-       */
+      // Ignore invalid nested JSON.
     }
   }
 
@@ -163,14 +162,21 @@ function normalizeAIClips(data: any): AIClip[] {
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([])
-  const [loadingProjects, setLoadingProjects] = useState(true)
+  const [loadingProjects, setLoadingProjects] =
+    useState(true)
 
   const [selectedProject, setSelectedProject] =
     useState<Project | null>(null)
 
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [projectName, setProjectName] = useState("")
-  const [creating, setCreating] = useState(false)
+  const [showCreateModal, setShowCreateModal] =
+    useState(false)
+
+  const [projectName, setProjectName] =
+    useState("")
+
+  const [creating, setCreating] =
+    useState(false)
+
   const [error, setError] = useState("")
 
   async function loadProjects() {
@@ -187,10 +193,15 @@ function App() {
         )
       }
 
-      const data: Project[] = await response.json()
+      const data: Project[] =
+        await response.json()
+
       setProjects(data)
     } catch (err) {
-      console.error("Failed to load projects:", err)
+      console.error(
+        "Failed to load projects:",
+        err
+      )
     } finally {
       setLoadingProjects(false)
     }
@@ -212,19 +223,23 @@ function App() {
     setError("")
 
     try {
-      const response = await fetch(`${API_URL}/projects`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name,
-          user_id: DEV_USER_ID,
-        }),
-      })
+      const response = await fetch(
+        `${API_URL}/projects`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name,
+            user_id: DEV_USER_ID,
+          }),
+        }
+      )
 
       if (!response.ok) {
-        const errorText = await response.text()
+        const errorText =
+          await response.text()
 
         throw new Error(
           errorText ||
@@ -232,7 +247,8 @@ function App() {
         )
       }
 
-      const createdProject: Project = await response.json()
+      const createdProject: Project =
+        await response.json()
 
       setProjects((currentProjects) => [
         createdProject,
@@ -242,7 +258,10 @@ function App() {
       setProjectName("")
       setShowCreateModal(false)
     } catch (err) {
-      console.error("Failed to create project:", err)
+      console.error(
+        "Failed to create project:",
+        err
+      )
 
       setError(
         err instanceof Error
@@ -254,7 +273,9 @@ function App() {
     }
   }
 
-  async function deleteProject(project: Project) {
+  async function deleteProject(
+    project: Project
+  ) {
     const confirmed = window.confirm(
       `Delete project "${project.name}"?\n\nThis will permanently delete the project, its videos, transcripts and uploaded video files.`
     )
@@ -270,10 +291,12 @@ function App() {
       )
 
       if (!response.ok) {
-        let message = "Failed to delete project."
+        let message =
+          "Failed to delete project."
 
         try {
-          const data = await response.json()
+          const data =
+            await response.json()
 
           if (data.detail) {
             message = data.detail
@@ -291,11 +314,16 @@ function App() {
         )
       )
 
-      if (selectedProject?.id === project.id) {
+      if (
+        selectedProject?.id === project.id
+      ) {
         setSelectedProject(null)
       }
     } catch (err) {
-      console.error("Failed to delete project:", err)
+      console.error(
+        "Failed to delete project:",
+        err
+      )
 
       window.alert(
         err instanceof Error
@@ -349,7 +377,9 @@ function App() {
           </div>
 
           <span className="text-xl font-bold tracking-tight">
-            Clip<span className="text-orange-400">Forge</span>
+            Clip<span className="text-orange-400">
+              Forge
+            </span>
           </span>
         </div>
 
@@ -564,7 +594,9 @@ function App() {
                         project.created_at
                       ).toLocaleString()}
                       color="from-violet-500/30 to-blue-500/10"
-                      onClick={() => openProject(project)}
+                      onClick={() =>
+                        openProject(project)
+                      }
                     />
 
                     <button
@@ -589,7 +621,10 @@ function App() {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
               closeCreateModal()
             }
           }}
@@ -624,11 +659,16 @@ function App() {
                 autoFocus
                 value={projectName}
                 onChange={(event) => {
-                  setProjectName(event.target.value)
+                  setProjectName(
+                    event.target.value
+                  )
                   setError("")
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && !creating) {
+                  if (
+                    event.key === "Enter" &&
+                    !creating
+                  ) {
                     createProject()
                   }
                 }}
@@ -655,10 +695,15 @@ function App() {
 
               <button
                 onClick={createProject}
-                disabled={creating || !projectName.trim()}
+                disabled={
+                  creating ||
+                  !projectName.trim()
+                }
                 className="rounded-xl bg-orange-500 px-5 py-2.5 text-sm font-semibold transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {creating ? "Creating..." : "Create Project"}
+                {creating
+                  ? "Creating..."
+                  : "Create Project"}
               </button>
             </div>
           </div>
@@ -677,16 +722,26 @@ function ProjectPage({
   project: Project
   onBack: () => void
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const fileInputRef =
+    useRef<HTMLInputElement | null>(null)
 
-  const [videos, setVideos] = useState<VideoFile[]>([])
-  const [loadingVideos, setLoadingVideos] = useState(true)
+  const [videos, setVideos] =
+    useState<VideoFile[]>([])
 
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
+  const [loadingVideos, setLoadingVideos] =
+    useState(true)
 
-  const [uploadError, setUploadError] = useState("")
-  const [uploadSuccess, setUploadSuccess] = useState("")
+  const [uploading, setUploading] =
+    useState(false)
+
+  const [uploadProgress, setUploadProgress] =
+    useState(0)
+
+  const [uploadError, setUploadError] =
+    useState("")
+
+  const [uploadSuccess, setUploadSuccess] =
+    useState("")
 
   const [deletingVideoId, setDeletingVideoId] =
     useState<string | null>(null)
@@ -694,17 +749,41 @@ function ProjectPage({
   const [aiAnalysis, setAiAnalysis] =
     useState<Record<string, AIClip[]>>({})
 
-  const [analysisCompleted, setAnalysisCompleted] =
-    useState<Record<string, boolean>>({})
+  const [
+    analysisCompleted,
+    setAnalysisCompleted,
+  ] = useState<Record<string, boolean>>({})
 
   const [analyzingVideoId, setAnalyzingVideoId] =
     useState<string | null>(null)
 
-  const [analysisProgress, setAnalysisProgress] = useState(0)
+  const [analysisProgress, setAnalysisProgress] =
+    useState(0)
 
-  const [aiError, setAiError] = useState("")
+  const [aiError, setAiError] =
+    useState("")
 
-  async function loadVideos(showLoading = false) {
+  const [
+    generatedClips,
+    setGeneratedClips,
+  ] = useState<
+    Record<
+      string,
+      Record<string, GeneratedClip>
+    >
+  >({})
+
+  const [
+    creatingClip,
+    setCreatingClip,
+  ] = useState<{
+    videoId: string
+    index: number
+  } | null>(null)
+
+  async function loadVideos(
+    showLoading = false
+  ) {
     try {
       if (showLoading) {
         setLoadingVideos(true)
@@ -720,7 +799,8 @@ function ProjectPage({
         )
       }
 
-      const data: VideoFile[] = await response.json()
+      const data: VideoFile[] =
+        await response.json()
 
       setVideos((currentVideos) => {
         if (
@@ -733,7 +813,10 @@ function ProjectPage({
         return data
       })
     } catch (err) {
-      console.error("Failed to load videos:", err)
+      console.error(
+        "Failed to load videos:",
+        err
+      )
     } finally {
       if (showLoading) {
         setLoadingVideos(false)
@@ -744,26 +827,25 @@ function ProjectPage({
   useEffect(() => {
     loadVideos(true)
 
-    const interval = window.setInterval(() => {
-      loadVideos(false)
-    }, 3000)
+    const interval =
+      window.setInterval(() => {
+        loadVideos(false)
+      }, 3000)
 
     return () => {
       window.clearInterval(interval)
     }
   }, [project.id])
 
-  async function analyzeVideo(video: VideoFile) {
+  async function analyzeVideo(
+    video: VideoFile
+  ) {
     if (analyzingVideoId) return
 
     setAnalyzingVideoId(video.id)
     setAnalysisProgress(5)
     setAiError("")
 
-    /*
-     * Clear old result while a new analysis is running.
-     * This prevents stale clips from being shown as new results.
-     */
     setAiAnalysis((current) => {
       const next = { ...current }
       delete next[video.id]
@@ -775,22 +857,26 @@ function ProjectPage({
       [video.id]: false,
     }))
 
-    const progressTimer = window.setInterval(() => {
-      setAnalysisProgress((current) => {
-        if (current >= 90) {
-          return current
-        }
+    const progressTimer =
+      window.setInterval(() => {
+        setAnalysisProgress((current) => {
+          if (current >= 90) {
+            return current
+          }
 
-        const increment =
-          current < 30
-            ? Math.random() * 6
-            : current < 70
-              ? Math.random() * 4
-              : Math.random() * 2
+          const increment =
+            current < 30
+              ? Math.random() * 6
+              : current < 70
+                ? Math.random() * 4
+                : Math.random() * 2
 
-        return Math.min(current + increment, 90)
-      })
-    }, 1000)
+          return Math.min(
+            current + increment,
+            90
+          )
+        })
+      }, 1000)
 
     try {
       console.log(
@@ -808,13 +894,8 @@ function ProjectPage({
         }
       )
 
-      /*
-       * Read as text first.
-       *
-       * This is important because it lets us see exactly
-       * what the backend/Ollama returned.
-       */
-      const rawText = await response.text()
+      const rawText =
+        await response.text()
 
       console.log(
         "[AI] RAW BACKEND RESPONSE:",
@@ -847,10 +928,8 @@ function ProjectPage({
         )
       }
 
-      /*
-       * Convert the response into AIClip[].
-       */
-      const clips = normalizeAIClips(data)
+      const clips =
+        normalizeAIClips(data)
 
       console.log(
         "[AI] NORMALIZED CLIPS:",
@@ -867,17 +946,11 @@ function ProjectPage({
         )
       }
 
-      /*
-       * SAVE CLIPS
-       */
       setAiAnalysis((current) => ({
         ...current,
         [video.id]: clips,
       }))
 
-      /*
-       * Mark analysis complete.
-       */
       setAnalysisCompleted((current) => ({
         ...current,
         [video.id]: true,
@@ -907,11 +980,10 @@ function ProjectPage({
 
       setAnalysisProgress(0)
     } finally {
-      window.clearInterval(progressTimer)
+      window.clearInterval(
+        progressTimer
+      )
 
-      /*
-       * Give React enough time to render the final result.
-       */
       window.setTimeout(() => {
         setAnalyzingVideoId(null)
         setAnalysisProgress(0)
@@ -919,7 +991,116 @@ function ProjectPage({
     }
   }
 
-  async function deleteVideo(video: VideoFile) {
+  async function createClip(
+    video: VideoFile,
+    clip: AIClip,
+    index: number
+  ) {
+    const key = `${clip.start}-${clip.end}`
+
+    setCreatingClip({
+      videoId: video.id,
+      index,
+    })
+
+    try {
+      const params =
+        new URLSearchParams({
+          start: String(clip.start),
+          end: String(clip.end),
+        })
+
+      const response = await fetch(
+        `${API_URL}/projects/${project.id}/videos/${video.id}/clips?${params.toString()}`,
+        {
+          method: "POST",
+        }
+      )
+
+      const raw =
+        await response.text()
+
+      let data: any = {}
+
+      try {
+        data = JSON.parse(raw)
+      } catch {
+        throw new Error(
+          raw ||
+            "Backend returned invalid JSON."
+        )
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            "Failed to create clip."
+        )
+      }
+
+      if (
+        !data?.clip_id ||
+        !data?.filename ||
+        !data?.url
+      ) {
+        throw new Error(
+          "Backend created a response, but the clip information is missing."
+        )
+      }
+
+      const generated: GeneratedClip = {
+        clip_id: String(
+          data.clip_id
+        ),
+        filename: String(
+          data.filename
+        ),
+        start: Number(
+          data.start ?? clip.start
+        ),
+        end: Number(
+          data.end ?? clip.end
+        ),
+        duration: Number(
+          data.duration ??
+            clip.end - clip.start
+        ),
+        url: String(data.url),
+      }
+
+      console.log(
+        "[ClipForge] Generated clip:",
+        generated
+      )
+
+      setGeneratedClips(
+        (current) => ({
+          ...current,
+          [video.id]: {
+            ...(current[video.id] || {}),
+            [key]: generated,
+          },
+        })
+      )
+    } catch (error) {
+      console.error(
+        "[ClipForge] Clip creation failed:",
+        error
+      )
+
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to create clip."
+      )
+    } finally {
+      setCreatingClip(null)
+    }
+  }
+
+  async function deleteVideo(
+    video: VideoFile
+  ) {
     const confirmed = window.confirm(
       `Delete "${video.filename}"?\n\nThis will permanently delete the uploaded video and its transcript.`
     )
@@ -937,10 +1118,12 @@ function ProjectPage({
       )
 
       if (!response.ok) {
-        let message = "Failed to delete video."
+        let message =
+          "Failed to delete video."
 
         try {
-          const data = await response.json()
+          const data =
+            await response.json()
 
           if (data.detail) {
             message = data.detail
@@ -969,8 +1152,17 @@ function ProjectPage({
         delete next[video.id]
         return next
       })
+
+      setGeneratedClips((current) => {
+        const next = { ...current }
+        delete next[video.id]
+        return next
+      })
     } catch (err) {
-      console.error("Failed to delete video:", err)
+      console.error(
+        "Failed to delete video:",
+        err
+      )
 
       window.alert(
         err instanceof Error
@@ -1005,11 +1197,14 @@ function ProjectPage({
       ".m4v",
     ]
 
-    const filename = file.name.toLowerCase()
+    const filename =
+      file.name.toLowerCase()
 
-    const isAllowed = allowedExtensions.some(
-      (extension) => filename.endsWith(extension)
-    )
+    const isAllowed =
+      allowedExtensions.some(
+        (extension) =>
+          filename.endsWith(extension)
+      )
 
     if (!isAllowed) {
       setUploadError(
@@ -1019,17 +1214,22 @@ function ProjectPage({
       return
     }
 
-    const maxSize = 10 * 1024 * 1024 * 1024
+    const maxSize =
+      10 * 1024 * 1024 * 1024
 
     if (file.size > maxSize) {
-      setUploadError("The maximum file size is 10 GB.")
+      setUploadError(
+        "The maximum file size is 10 GB."
+      )
       return
     }
 
     const formData = new FormData()
+
     formData.append("file", file)
 
-    const xhr = new XMLHttpRequest()
+    const xhr =
+      new XMLHttpRequest()
 
     xhr.open(
       "POST",
@@ -1038,10 +1238,14 @@ function ProjectPage({
 
     setUploading(true)
 
-    xhr.upload.onprogress = (event) => {
+    xhr.upload.onprogress = (
+      event
+    ) => {
       if (event.lengthComputable) {
         const progress = Math.round(
-          (event.loaded / event.total) * 100
+          (event.loaded /
+            event.total) *
+            100
         )
 
         setUploadProgress(progress)
@@ -1051,7 +1255,10 @@ function ProjectPage({
     xhr.onload = async () => {
       setUploading(false)
 
-      if (xhr.status >= 200 && xhr.status < 300) {
+      if (
+        xhr.status >= 200 &&
+        xhr.status < 300
+      ) {
         setUploadProgress(100)
 
         setUploadSuccess(
@@ -1059,21 +1266,26 @@ function ProjectPage({
         )
 
         if (fileInputRef.current) {
-          fileInputRef.current.value = ""
+          fileInputRef.current.value =
+            ""
         }
 
         await loadVideos(false)
       } else {
-        let message = "Video upload failed."
+        let message =
+          "Video upload failed."
 
         try {
-          const data = JSON.parse(xhr.responseText)
+          const data =
+            JSON.parse(
+              xhr.responseText
+            )
 
           if (data.detail) {
             message = data.detail
           }
         } catch {
-          // Ignore invalid JSON response.
+          // Ignore invalid JSON.
         }
 
         setUploadError(message)
@@ -1091,7 +1303,9 @@ function ProjectPage({
     xhr.onabort = () => {
       setUploading(false)
 
-      setUploadError("Upload was cancelled.")
+      setUploadError(
+        "Upload was cancelled."
+      )
     }
 
     xhr.send(formData)
@@ -1100,7 +1314,8 @@ function ProjectPage({
   function handleFileChange(
     event: ChangeEvent<HTMLInputElement>
   ) {
-    const file = event.target.files?.[0]
+    const file =
+      event.target.files?.[0]
 
     if (!file) return
 
@@ -1317,7 +1532,8 @@ function ProjectPage({
                   key={video.id}
                   video={video}
                   deleting={
-                    deletingVideoId === video.id
+                    deletingVideoId ===
+                    video.id
                   }
                   onDelete={() =>
                     deleteVideo(video)
@@ -1326,18 +1542,44 @@ function ProjectPage({
                     analyzeVideo(video)
                   }
                   analyzing={
-                    analyzingVideoId === video.id
+                    analyzingVideoId ===
+                    video.id
                   }
                   analysisProgress={
-                    analyzingVideoId === video.id
+                    analyzingVideoId ===
+                    video.id
                       ? analysisProgress
                       : 0
                   }
                   analysisCompleted={
-                    analysisCompleted[video.id] === true
+                    analysisCompleted[
+                      video.id
+                    ] === true
                   }
                   aiClips={
-                    aiAnalysis[video.id] ?? []
+                    aiAnalysis[video.id] ??
+                    []
+                  }
+                  generatedClips={
+                    generatedClips[
+                      video.id
+                    ] ?? {}
+                  }
+                  onCreateClip={(
+                    clip,
+                    index
+                  ) =>
+                    createClip(
+                      video,
+                      clip,
+                      index
+                    )
+                  }
+                  creatingClipIndex={
+                    creatingClip?.videoId ===
+                    video.id
+                      ? creatingClip.index
+                      : null
                   }
                 />
               ))}
@@ -1356,21 +1598,86 @@ function ProjectPage({
             </p>
           </div>
 
-          <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-10 text-center">
-            <Clapperboard
-              size={30}
-              className="mx-auto text-zinc-700"
-            />
+          {Object.values(
+            generatedClips
+          ).some(
+            (videoClips) =>
+              Object.keys(videoClips)
+                .length > 0
+          ) ? (
+            <div className="space-y-3">
+              {Object.entries(
+                generatedClips
+              ).flatMap(
+                ([videoId, clips]) =>
+                  Object.values(clips).map(
+                    (clip) => (
+                      <div
+                        key={`${videoId}-${clip.clip_id}`}
+                        className="flex flex-col gap-4 rounded-2xl border border-green-500/20 bg-green-500/[0.03] p-5 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="flex min-w-0 items-center gap-4">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-500/10 text-green-400">
+                            <Video
+                              size={20}
+                            />
+                          </div>
 
-            <p className="mt-4 text-sm text-zinc-500">
-              No clips generated yet.
-            </p>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold">
+                              {clip.filename}
+                            </p>
 
-            <p className="mt-1 text-xs text-zinc-600">
-              Use AI Clip Suggestions above to find moments,
-              then create the MP4 clips.
-            </p>
-          </div>
+                            <p className="mt-1 text-xs text-zinc-500">
+                              {formatTime(
+                                clip.start
+                              )}{" "}
+                              –{" "}
+                              {formatTime(
+                                clip.end
+                              )}{" "}
+                              ·{" "}
+                              {Math.round(
+                                clip.duration
+                              )}
+                              s
+                            </p>
+                          </div>
+                        </div>
+
+                        <a
+                          href={`${API_URL}${clip.url}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-xs font-semibold text-black transition hover:bg-green-400"
+                        >
+                          <Video
+                            size={14}
+                          />
+                          Open MP4
+                        </a>
+                      </div>
+                    )
+                  )
+              )}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-10 text-center">
+              <Clapperboard
+                size={30}
+                className="mx-auto text-zinc-700"
+              />
+
+              <p className="mt-4 text-sm text-zinc-500">
+                No clips generated yet.
+              </p>
+
+              <p className="mt-1 text-xs text-zinc-600">
+                Use AI Clip Suggestions above to find moments,
+                then create the MP4 clips.
+              </p>
+            </div>
+          )}
         </section>
       </div>
     </div>
@@ -1388,6 +1695,9 @@ function VideoCard({
   analysisProgress,
   analysisCompleted,
   aiClips,
+  generatedClips,
+  onCreateClip,
+  creatingClipIndex,
 }: {
   video: VideoFile
   deleting: boolean
@@ -1397,16 +1707,32 @@ function VideoCard({
   analysisProgress: number
   analysisCompleted: boolean
   aiClips: AIClip[]
+  generatedClips: Record<
+    string,
+    GeneratedClip
+  >
+  onCreateClip: (
+    clip: AIClip,
+    index: number
+  ) => void
+  creatingClipIndex: number | null
 }) {
   const [showTranscript, setShowTranscript] =
     useState(false)
 
   function getStatus() {
-    switch (video.processing_status) {
+    switch (
+      video.processing_status
+    ) {
       case "completed":
         return {
-          label: "Transcription complete",
-          icon: <CheckCircle2 size={15} />,
+          label:
+            "Transcription complete",
+          icon: (
+            <CheckCircle2
+              size={15}
+            />
+          ),
           className:
             "border-green-500/20 bg-green-500/10 text-green-400",
         }
@@ -1427,15 +1753,22 @@ function VideoCard({
       case "failed":
         return {
           label: "Processing failed",
-          icon: <AlertCircle size={15} />,
+          icon: (
+            <AlertCircle
+              size={15}
+            />
+          ),
           className:
             "border-red-500/20 bg-red-500/10 text-red-400",
         }
 
       default:
         return {
-          label: "Waiting for processing",
-          icon: <Clock size={15} />,
+          label:
+            "Waiting for processing",
+          icon: (
+            <Clock size={15} />
+          ),
           className:
             "border-yellow-500/20 bg-yellow-500/10 text-yellow-400",
         }
@@ -1488,7 +1821,9 @@ function VideoCard({
 
             <button
               onClick={onDelete}
-              disabled={deleting || analyzing}
+              disabled={
+                deleting || analyzing
+              }
               className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs font-semibold text-red-400 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {deleting ? (
@@ -1500,7 +1835,9 @@ function VideoCard({
                 <Trash2 size={14} />
               )}
 
-              {deleting ? "Deleting..." : "Delete"}
+              {deleting
+                ? "Deleting..."
+                : "Delete"}
             </button>
           </div>
 
@@ -1515,7 +1852,8 @@ function VideoCard({
         </div>
       </div>
 
-      {video.processing_status === "failed" &&
+      {video.processing_status ===
+        "failed" &&
         video.processing_error && (
           <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
             <div className="flex gap-3">
@@ -1530,297 +1868,376 @@ function VideoCard({
                 </p>
 
                 <p className="mt-1 break-words text-xs leading-5 text-red-400/70">
-                  {video.processing_error}
+                  {
+                    video.processing_error
+                  }
                 </p>
               </div>
             </div>
           </div>
         )}
 
-      {video.processing_status === "processing" && (
-        <div className="mt-4 rounded-xl border border-orange-500/10 bg-orange-500/5 p-4">
-          <div className="flex items-center gap-3">
-            <Loader2
-              size={18}
-              className="animate-spin text-orange-400"
-            />
+      {video.processing_status ===
+        "processing" && (
+          <div className="mt-4 rounded-xl border border-orange-500/10 bg-orange-500/5 p-4">
+            <div className="flex items-center gap-3">
+              <Loader2
+                size={18}
+                className="animate-spin text-orange-400"
+              />
 
-            <div>
-              <p className="text-sm font-medium text-orange-300">
-                AI transcription in progress
-              </p>
-
-              <p className="mt-1 text-xs text-orange-400/60">
-                Whisper is analyzing the audio and generating
-                timestamped segments.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* AI CLIP SUGGESTIONS */}
-
-      {video.processing_status === "completed" && (
-        <div className="mt-4 overflow-hidden rounded-xl border border-orange-500/20 bg-orange-500/[0.03]">
-          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <Zap
-                  size={17}
-                  className="text-orange-400"
-                />
-
-                <p className="text-sm font-semibold">
-                  AI Clip Suggestions
+              <div>
+                <p className="text-sm font-medium text-orange-300">
+                  AI transcription in progress
                 </p>
 
-                {analysisCompleted && !analyzing && (
-                  <span className="inline-flex items-center gap-1 rounded-lg bg-green-500/10 px-2 py-1 text-[10px] font-semibold text-green-400">
-                    <CheckCircle2 size={11} />
-                    Complete
-                  </span>
-                )}
+                <p className="mt-1 text-xs text-orange-400/60">
+                  Whisper is analyzing the audio and generating
+                  timestamped segments.
+                </p>
               </div>
-
-              <p className="mt-1 text-xs text-zinc-500">
-                {analyzing
-                  ? "Ollama is analyzing this video..."
-                  : aiClips.length > 0
-                    ? `${aiClips.length} AI clip suggestions found.`
-                    : analysisCompleted
-                      ? "Analysis completed, but no valid clips were returned."
-                      : "Let Ollama find the strongest moments in this video."}
-              </p>
             </div>
+          </div>
+        )}
 
-            <button
-              onClick={onAnalyze}
-              disabled={analyzing}
-              className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {analyzing ? (
-                <>
-                  <Loader2
-                    size={15}
-                    className="animate-spin"
+      {video.processing_status ===
+        "completed" && (
+          <div className="mt-4 overflow-hidden rounded-xl border border-orange-500/20 bg-orange-500/[0.03]">
+            <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Zap
+                    size={17}
+                    className="text-orange-400"
                   />
-                  Finding Clips...
-                </>
-              ) : aiClips.length > 0 ? (
-                <>
-                  <Zap size={15} />
-                  Analyze Again
-                </>
-              ) : (
-                <>
-                  <Zap size={15} />
-                  Find Clips
-                </>
-              )}
-            </button>
-          </div>
 
-          {/* PROGRESS */}
-
-          {analyzing && (
-            <div className="border-t border-orange-500/10 px-4 py-5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500/10">
-                    <Loader2
-                      size={18}
-                      className="animate-spin text-orange-400"
-                    />
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-medium text-orange-300">
-                      Ollama is analyzing your video
-                    </p>
-
-                    <p className="mt-1 text-xs text-zinc-600">
-                      {getAnalysisStage()}
-                    </p>
-                  </div>
-                </div>
-
-                <span className="text-sm font-bold text-orange-400">
-                  {Math.round(analysisProgress)}%
-                </span>
-              </div>
-
-              <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-500 ease-out"
-                  style={{
-                    width: `${analysisProgress}%`,
-                  }}
-                />
-              </div>
-
-              <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-700">
-                <span>Llama 3.2 3B</span>
-
-                <span>
-                  {analysisProgress < 70
-                    ? "AI inference"
-                    : "Finalizing"}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* RESULTS */}
-
-          {!analyzing && aiClips.length > 0 && (
-            <div className="border-t border-orange-500/10 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-600">
-                    Suggested Clips
+                  <p className="text-sm font-semibold">
+                    AI Clip Suggestions
                   </p>
 
-                  <p className="mt-1 text-xs text-zinc-700">
-                    AI-selected moments from your video
-                  </p>
+                  {analysisCompleted &&
+                    !analyzing && (
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-green-500/10 px-2 py-1 text-[10px] font-semibold text-green-400">
+                        <CheckCircle2
+                          size={11}
+                        />
+                        Complete
+                      </span>
+                    )}
                 </div>
 
-                <span className="rounded-lg bg-orange-500/10 px-2 py-1 text-[10px] font-semibold text-orange-400">
-                  {aiClips.length} found
-                </span>
-              </div>
-
-              <div className="space-y-3">
-                {aiClips.map((clip, index) => (
-                  <div
-                    key={`${video.id}-ai-${index}-${clip.start}-${clip.end}`}
-                    className="rounded-xl border border-white/5 bg-white/[0.02] p-4 transition hover:border-orange-500/20 hover:bg-orange-500/[0.02]"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-[10px] font-bold text-orange-400">
-                            {index + 1}
-                          </span>
-
-                          <h4 className="text-sm font-semibold text-white">
-                            {clip.title}
-                          </h4>
-                        </div>
-
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <Clock
-                            size={13}
-                            className="text-zinc-600"
-                          />
-
-                          <span className="font-mono text-xs text-orange-400">
-                            {formatTime(clip.start)}
-                            {" – "}
-                            {formatTime(clip.end)}
-                          </span>
-
-                          <span className="text-xs text-zinc-700">
-                            (
-                            {Math.max(
-                              0,
-                              Math.round(
-                                clip.end - clip.start
-                              )
-                            )}
-                            s)
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {clip.hook && (
-                      <div className="mt-3 rounded-lg bg-black/20 p-3">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
-                          Hook
-                        </p>
-
-                        <p className="mt-1 text-xs leading-5 text-zinc-300">
-                          {clip.hook}
-                        </p>
-                      </div>
-                    )}
-
-                    {clip.reason && (
-                      <p className="mt-3 text-xs leading-5 text-zinc-500">
-                        <span className="font-semibold text-zinc-400">
-                          Why:
-                        </span>{" "}
-                        {clip.reason}
-                      </p>
-                    )}
-
-                    <div className="mt-4 flex gap-2">
-                      <button
-                        disabled
-                        className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-zinc-600"
-                        title="Clip creation will be enabled in the next step"
-                      >
-                        <Clapperboard size={13} />
-                        Create Clip
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* COMPLETED BUT EMPTY */}
-
-          {!analyzing &&
-            analysisCompleted &&
-            aiClips.length === 0 && (
-              <div className="border-t border-orange-500/10 px-4 py-5">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-yellow-500/10">
-                    <AlertCircle
-                      size={16}
-                      className="text-yellow-400"
-                    />
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-medium text-zinc-300">
-                      Analysis completed, but no clips were returned.
-                    </p>
-
-                    <p className="mt-1 text-xs text-zinc-600">
-                      Try Analyze Again. If this keeps happening,
-                      check the browser console and backend response.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-          {/* NOT ANALYZED */}
-
-          {!analyzing &&
-            !analysisCompleted &&
-            aiClips.length === 0 && (
-              <div className="border-t border-orange-500/10 px-4 py-4">
-                <p className="text-xs text-zinc-600">
-                  Click{" "}
-                  <span className="font-medium text-orange-400">
-                    Find Clips
-                  </span>{" "}
-                  to let Ollama analyze this transcript.
+                <p className="mt-1 text-xs text-zinc-500">
+                  {analyzing
+                    ? "Ollama is analyzing this video..."
+                    : aiClips.length >
+                        0
+                      ? `${aiClips.length} AI clip suggestions found.`
+                      : analysisCompleted
+                        ? "Analysis completed, but no valid clips were returned."
+                        : "Let Ollama find the strongest moments in this video."}
                 </p>
               </div>
+
+              <button
+                onClick={onAnalyze}
+                disabled={analyzing}
+                className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2
+                      size={15}
+                      className="animate-spin"
+                    />
+                    Finding Clips...
+                  </>
+                ) : aiClips.length >
+                  0 ? (
+                  <>
+                    <Zap size={15} />
+                    Analyze Again
+                  </>
+                ) : (
+                  <>
+                    <Zap size={15} />
+                    Find Clips
+                  </>
+                )}
+              </button>
+            </div>
+
+            {analyzing && (
+              <div className="border-t border-orange-500/10 px-4 py-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500/10">
+                      <Loader2
+                        size={18}
+                        className="animate-spin text-orange-400"
+                      />
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-medium text-orange-300">
+                        Ollama is analyzing your video
+                      </p>
+
+                      <p className="mt-1 text-xs text-zinc-600">
+                        {getAnalysisStage()}
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="text-sm font-bold text-orange-400">
+                    {Math.round(
+                      analysisProgress
+                    )}
+                    %
+                  </span>
+                </div>
+
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-500 ease-out"
+                    style={{
+                      width: `${analysisProgress}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="mt-3 flex items-center justify-between text-[10px] text-zinc-700">
+                  <span>
+                    Llama 3.2 3B
+                  </span>
+
+                  <span>
+                    {analysisProgress <
+                    70
+                      ? "AI inference"
+                      : "Finalizing"}
+                  </span>
+                </div>
+              </div>
             )}
-        </div>
-      )}
 
-      {/* TRANSCRIPT */}
+            {!analyzing &&
+              aiClips.length > 0 && (
+                <div className="border-t border-orange-500/10 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-600">
+                        Suggested Clips
+                      </p>
 
-      {video.processing_status === "completed" &&
+                      <p className="mt-1 text-xs text-zinc-700">
+                        AI-selected moments from your video
+                      </p>
+                    </div>
+
+                    <span className="rounded-lg bg-orange-500/10 px-2 py-1 text-[10px] font-semibold text-orange-400">
+                      {aiClips.length}{" "}
+                      found
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {aiClips.map(
+                      (
+                        clip,
+                        index
+                      ) => {
+                        const clipKey = `${clip.start}-${clip.end}`
+                        const generated =
+                          generatedClips[
+                            clipKey
+                          ]
+
+                        const isCreating =
+                          creatingClipIndex ===
+                          index
+
+                        return (
+                          <div
+                            key={`${video.id}-ai-${index}-${clip.start}-${clip.end}`}
+                            className="rounded-xl border border-white/5 bg-white/[0.02] p-4 transition hover:border-orange-500/20 hover:bg-orange-500/[0.02]"
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-[10px] font-bold text-orange-400">
+                                    {index +
+                                      1}
+                                  </span>
+
+                                  <h4 className="text-sm font-semibold text-white">
+                                    {
+                                      clip.title
+                                    }
+                                  </h4>
+                                </div>
+
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <Clock
+                                    size={
+                                      13
+                                    }
+                                    className="text-zinc-600"
+                                  />
+
+                                  <span className="font-mono text-xs text-orange-400">
+                                    {formatTime(
+                                      clip.start
+                                    )}
+                                    {" – "}
+                                    {formatTime(
+                                      clip.end
+                                    )}
+                                  </span>
+
+                                  <span className="text-xs text-zinc-700">
+                                    (
+                                    {Math.max(
+                                      0,
+                                      Math.round(
+                                        clip.end -
+                                          clip.start
+                                      )
+                                    )}
+                                    s)
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {clip.hook && (
+                              <div className="mt-3 rounded-lg bg-black/20 p-3">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+                                  Hook
+                                </p>
+
+                                <p className="mt-1 text-xs leading-5 text-zinc-300">
+                                  {
+                                    clip.hook
+                                  }
+                                </p>
+                              </div>
+                            )}
+
+                            {clip.reason && (
+                              <p className="mt-3 text-xs leading-5 text-zinc-500">
+                                <span className="font-semibold text-zinc-400">
+                                  Why:
+                                </span>{" "}
+                                {
+                                  clip.reason
+                                }
+                              </p>
+                            )}
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              {!generated ? (
+                                <button
+                                  onClick={() =>
+                                    onCreateClip(
+                                      clip,
+                                      index
+                                    )
+                                  }
+                                  disabled={
+                                    creatingClipIndex !==
+                                      null
+                                  }
+                                  className="flex items-center gap-2 rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isCreating ? (
+                                    <>
+                                      <Loader2
+                                        size={
+                                          13
+                                        }
+                                        className="animate-spin"
+                                      />
+                                      Creating...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Clapperboard
+                                        size={
+                                          13
+                                        }
+                                      />
+                                      Create Clip
+                                    </>
+                                  )}
+                                </button>
+                              ) : (
+                                <a
+                                  href={`${API_URL}${generated.url}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-400 transition hover:bg-green-500/20"
+                                >
+                                  <Video
+                                    size={
+                                      13
+                                    }
+                                  />
+                                  Open MP4
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      }
+                    )}
+                  </div>
+                </div>
+              )}
+
+            {!analyzing &&
+              analysisCompleted &&
+              aiClips.length === 0 && (
+                <div className="border-t border-orange-500/10 px-4 py-5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-yellow-500/10">
+                      <AlertCircle
+                        size={16}
+                        className="text-yellow-400"
+                      />
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-medium text-zinc-300">
+                        Analysis completed, but no clips were returned.
+                      </p>
+
+                      <p className="mt-1 text-xs text-zinc-600">
+                        Try Analyze Again. If this keeps happening,
+                        check the browser console and backend response.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            {!analyzing &&
+              !analysisCompleted &&
+              aiClips.length === 0 && (
+                <div className="border-t border-orange-500/10 px-4 py-4">
+                  <p className="text-xs text-zinc-600">
+                    Click{" "}
+                    <span className="font-medium text-orange-400">
+                      Find Clips
+                    </span>{" "}
+                    to let Ollama analyze this transcript.
+                  </p>
+                </div>
+              )}
+          </div>
+        )}
+
+      {video.processing_status ===
+        "completed" &&
         video.transcript && (
           <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-black/20">
             <button
@@ -1837,7 +2254,10 @@ function VideoCard({
                 </p>
 
                 <p className="mt-1 text-xs text-zinc-600">
-                  {video.transcript_segments?.length ?? 0}{" "}
+                  {video
+                    .transcript_segments
+                    ?.length ??
+                    0}{" "}
                   timestamped segments
                 </p>
               </div>
@@ -1845,7 +2265,9 @@ function VideoCard({
               <ChevronDown
                 size={17}
                 className={`text-zinc-500 transition-transform ${
-                  showTranscript ? "rotate-180" : ""
+                  showTranscript
+                    ? "rotate-180"
+                    : ""
                 }`}
               />
             </button>
@@ -1858,12 +2280,15 @@ function VideoCard({
                   </p>
 
                   <p className="text-sm leading-6 text-zinc-300">
-                    {video.transcript}
+                    {
+                      video.transcript
+                    }
                   </p>
                 </div>
 
                 {video.transcript_segments &&
-                  video.transcript_segments.length > 0 && (
+                  video.transcript_segments
+                    .length > 0 && (
                     <div className="border-t border-white/10">
                       <div className="p-4">
                         <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-600">
@@ -1872,23 +2297,32 @@ function VideoCard({
 
                         <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
                           {video.transcript_segments.map(
-                            (segment, index) => (
+                            (
+                              segment,
+                              index
+                            ) => (
                               <div
                                 key={`${video.id}-${index}`}
                                 className="group flex gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3 transition hover:border-orange-500/20 hover:bg-orange-500/[0.02]"
                               >
                                 <div className="shrink-0">
                                   <span className="inline-flex items-center rounded-lg bg-orange-500/10 px-2 py-1 font-mono text-xs font-medium text-orange-400">
-                                    {formatTime(segment.start)}
+                                    {formatTime(
+                                      segment.start
+                                    )}
                                   </span>
                                 </div>
 
                                 <p className="text-sm leading-6 text-zinc-300">
-                                  {segment.text}
+                                  {
+                                    segment.text
+                                  }
                                 </p>
 
                                 <span className="ml-auto hidden shrink-0 self-center font-mono text-[10px] text-zinc-700 group-hover:block">
-                                  {formatTime(segment.end)}
+                                  {formatTime(
+                                    segment.end
+                                  )}
                                 </span>
                               </div>
                             )

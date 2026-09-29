@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 import shutil
+import subprocess
 
 from fastapi import (
     BackgroundTasks,
@@ -11,6 +12,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -21,8 +23,16 @@ from app.whisper_service import transcribe_video
 from app.ollama_service import analyze_transcript
 
 
+# ============================================================
+# APP
+# ============================================================
+
 app = FastAPI(title="ClipForge API")
 
+
+# ============================================================
+# CORS
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,14 +46,26 @@ app.add_middleware(
 )
 
 
+# ============================================================
+# STORAGE
+# ============================================================
+
 UPLOAD_DIR = Path("/app/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+
+# ============================================================
+# MODELS
+# ============================================================
 
 class ProjectCreate(BaseModel):
     name: str
     user_id: str
 
+
+# ============================================================
+# ROOT
+# ============================================================
 
 @app.get("/")
 def root():
@@ -52,6 +74,10 @@ def root():
         "status": "online",
     }
 
+
+# ============================================================
+# HEALTH
+# ============================================================
 
 @app.get("/health")
 def health():
@@ -71,6 +97,10 @@ def health():
             "error": str(e),
         }
 
+
+# ============================================================
+# PROJECTS
+# ============================================================
 
 @app.get("/projects")
 def get_projects(
@@ -170,6 +200,10 @@ def delete_project(
         )
 
 
+# ============================================================
+# VIDEOS
+# ============================================================
+
 @app.get("/projects/{project_id}/videos")
 def get_project_videos(
     project_id: str,
@@ -255,6 +289,10 @@ def delete_video(
         )
 
 
+# ============================================================
+# WHISPER TRANSCRIPTION
+# ============================================================
+
 def process_video(video_id: str):
     db = SessionLocal()
 
@@ -324,6 +362,10 @@ def process_video(video_id: str):
         db.close()
 
 
+# ============================================================
+# UPLOAD VIDEO
+# ============================================================
+
 @app.post("/projects/{project_id}/videos")
 async def upload_video(
     project_id: str,
@@ -370,12 +412,14 @@ async def upload_video(
     video_id = str(uuid4())
 
     project_dir = UPLOAD_DIR / project_id
+
     project_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     stored_filename = f"{video_id}{extension}"
+
     storage_path = project_dir / stored_filename
 
     try:
@@ -426,6 +470,10 @@ async def upload_video(
     finally:
         await file.close()
 
+
+# ============================================================
+# AI VIDEO ANALYSIS
+# ============================================================
 
 @app.post("/projects/{project_id}/videos/{video_id}/analyze")
 def analyze_video(
@@ -481,3 +529,344 @@ def analyze_video(
             status_code=500,
             detail=f"Ollama analysis failed: {exc}",
         )
+
+
+# ============================================================
+# CREATE MP4 CLIP
+# ============================================================
+
+@app.post(
+    "/projects/{project_id}/videos/{video_id}/clips"
+)
+def create_clip(
+    project_id: str,
+    video_id: str,
+    start: float,
+    end: float,
+    db: Session = Depends(get_db),
+):
+    # --------------------------------------------------------
+    # Find video
+    # --------------------------------------------------------
+
+    video = (
+        db.query(Video)
+        .filter(
+            Video.id == video_id,
+            Video.project_id == project_id,
+        )
+        .first()
+    )
+
+    if not video:
+        raise HTTPException(
+            status_code=404,
+            detail="Video not found",
+        )
+
+    # --------------------------------------------------------
+    # Validate timestamps
+    # --------------------------------------------------------
+
+    try:
+        start = float(start)
+        end = float(end)
+
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid clip timestamps",
+        )
+
+    if start < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Clip start cannot be negative",
+        )
+
+    if end <= start:
+        raise HTTPException(
+            status_code=400,
+            detail="Clip end must be greater than start",
+        )
+
+    duration = end - start
+
+    if duration < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Clip must be at least 1 second long",
+        )
+
+    if duration > 120:
+        raise HTTPException(
+            status_code=400,
+            detail="Clip cannot be longer than 120 seconds",
+        )
+
+    # --------------------------------------------------------
+    # Source video
+    # --------------------------------------------------------
+
+    source_path = Path(video.storage_path)
+
+    if not source_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Source video file not found: "
+                f"{source_path}"
+            ),
+        )
+
+    # --------------------------------------------------------
+    # Create clips directory
+    # --------------------------------------------------------
+
+    clips_dir = (
+        UPLOAD_DIR
+        / project_id
+        / "clips"
+    )
+
+    clips_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    # --------------------------------------------------------
+    # Output filename
+    # --------------------------------------------------------
+
+    clip_id = str(uuid4())
+
+    output_filename = f"{clip_id}.mp4"
+
+    output_path = (
+        clips_dir
+        / output_filename
+    )
+
+    # --------------------------------------------------------
+    # FFmpeg command
+    # --------------------------------------------------------
+
+    command = [
+        "ffmpeg",
+
+        "-y",
+
+        # Seek
+        "-ss",
+        str(start),
+
+        # Input
+        "-i",
+        str(source_path),
+
+        # Duration
+        "-t",
+        str(duration),
+
+        # Video
+        "-map",
+        "0:v:0",
+
+        # Audio if available
+        "-map",
+        "0:a?",
+
+        # H.264
+        "-c:v",
+        "libx264",
+
+        # Encoding speed
+        "-preset",
+        "veryfast",
+
+        # Quality
+        "-crf",
+        "23",
+
+        # Audio
+        "-c:a",
+        "aac",
+
+        "-b:a",
+        "128k",
+
+        # Web-friendly MP4
+        "-movflags",
+        "+faststart",
+
+        # Output
+        str(output_path),
+    ]
+
+    print(
+        f"[Clip] Creating clip: "
+        f"{video.filename} "
+        f"{start:.2f}s -> {end:.2f}s"
+    )
+
+    print(
+        "[Clip] FFmpeg command:",
+        " ".join(command),
+    )
+
+    # --------------------------------------------------------
+    # Run FFmpeg
+    # --------------------------------------------------------
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "FFmpeg is not installed "
+                "inside the backend container."
+            ),
+        )
+
+    except subprocess.TimeoutExpired:
+        if output_path.exists():
+            output_path.unlink()
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "FFmpeg timed out while "
+                "creating the clip."
+            ),
+        )
+
+    # --------------------------------------------------------
+    # FFmpeg failed
+    # --------------------------------------------------------
+
+    if result.returncode != 0:
+        print(
+            "[Clip] FFmpeg failed:"
+        )
+
+        print(
+            result.stderr
+        )
+
+        if output_path.exists():
+            output_path.unlink()
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "FFmpeg failed to create "
+                "the clip."
+            ),
+        )
+
+    # --------------------------------------------------------
+    # Verify output
+    # --------------------------------------------------------
+
+    if not output_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "FFmpeg completed but "
+                "the output file was not created."
+            ),
+        )
+
+    # --------------------------------------------------------
+    # Get output file size
+    # --------------------------------------------------------
+
+    file_size = output_path.stat().st_size
+
+    if file_size == 0:
+        output_path.unlink()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Generated clip is empty.",
+        )
+
+    print(
+        f"[Clip] Created successfully: "
+        f"{output_path}"
+    )
+
+    print(
+        f"[Clip] Size: "
+        f"{file_size / 1024 / 1024:.2f} MB"
+    )
+
+    # --------------------------------------------------------
+    # Response
+    # --------------------------------------------------------
+
+    return {
+        "success": True,
+        "clip_id": clip_id,
+        "filename": output_filename,
+        "start": start,
+        "end": end,
+        "duration": duration,
+        "size": file_size,
+        "url": (
+            f"/projects/"
+            f"{project_id}/clips/"
+            f"{output_filename}"
+        ),
+    }
+
+
+# ============================================================
+# SERVE GENERATED MP4 CLIP
+# ============================================================
+
+@app.get(
+    "/projects/{project_id}/clips/{filename}"
+)
+def get_clip(
+    project_id: str,
+    filename: str,
+):
+    # Prevent path traversal
+    safe_filename = Path(filename).name
+
+    clips_dir = (
+        UPLOAD_DIR
+        / project_id
+        / "clips"
+    )
+
+    file_path = (
+        clips_dir
+        / safe_filename
+    )
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Clip not found",
+        )
+
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Clip not found",
+        )
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="video/mp4",
+        filename=safe_filename,
+    )
