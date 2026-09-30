@@ -1,207 +1,191 @@
 import json
 import os
-import time
-import urllib.error
-import urllib.request
+import re
+from typing import Any
+
+import requests
 
 
-OLLAMA_URL = os.getenv(
-    "OLLAMA_URL",
-    "http://ollama:11434",
-)
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 
-OLLAMA_MODEL = os.getenv(
-    "OLLAMA_MODEL",
-    "llama3.2:3b",
-)
-
-# Keep chunks small enough for the 4096 context model.
 MAX_SEGMENTS_PER_CHUNK = 30
-
-# Maximum number of retry attempts for one chunk.
 MAX_RETRIES = 2
 
-# Ollama generation settings.
 NUM_CTX = 2048
-NUM_PREDICT = 350
+NUM_PREDICT = 400
 TEMPERATURE = 0.2
 
-# We only want a small number of useful suggestions from each chunk.
 MAX_CLIPS_PER_CHUNK = 5
 
+# Final clip length
+MIN_CLIP_DURATION = 15.0
+MAX_CLIP_DURATION = 60.0
+DEFAULT_CLIP_DURATION = 30.0
 
-def build_prompt(transcript_segments):
-    """
-    Build the prompt sent to Ollama.
-    """
 
-    transcript = "\n".join(
-        f"[{segment['start']:.2f}s - {segment['end']:.2f}s] "
-        f"{segment['text']}"
-        for segment in transcript_segments
+# ============================================================
+# HELPERS
+# ============================================================
+
+def _segment_start(segment: dict[str, Any]) -> float:
+    return float(
+        segment.get(
+            "start",
+            segment.get("start_time", 0.0)
+        )
     )
 
+
+def _segment_end(segment: dict[str, Any]) -> float:
+    return float(
+        segment.get(
+            "end",
+            segment.get("end_time", _segment_start(segment))
+        )
+    )
+
+
+def _segment_text(segment: dict[str, Any]) -> str:
+    return str(
+        segment.get(
+            "text",
+            segment.get("content", "")
+        )
+    ).strip()
+
+
+def get_transcript_duration(segments: list[dict[str, Any]]) -> float:
+    if not segments:
+        return 0.0
+
+    return max(_segment_end(segment) for segment in segments)
+
+
+# ============================================================
+# PROMPT
+# ============================================================
+
+def build_prompt(segments: list[dict[str, Any]]) -> str:
+    transcript_lines = []
+
+    for segment in segments:
+        start = _segment_start(segment)
+        end = _segment_end(segment)
+        text = _segment_text(segment)
+
+        if not text:
+            continue
+
+        transcript_lines.append(
+            f"[{start:.2f} - {end:.2f}] {text}"
+        )
+
+    transcript = "\n".join(transcript_lines)
+
     return f"""
-You are an AI clip editor for short-form videos.
+You are an AI video editor for ClipForge.
 
-Analyze the transcript below and find the strongest moments that could
-work as short-form video clips.
+Analyze the transcript below and find the most interesting moments
+that could work as short-form social media clips.
 
-IMPORTANT RULES:
+IMPORTANT:
+- Do NOT create the final clip duration yourself.
+- Only identify the interesting MOMENT.
+- The backend will automatically expand the moment into a longer clip.
+- Choose moments with strong hooks, emotion, humor, surprise,
+  useful information, controversy, storytelling, or a satisfying payoff.
+- Prefer moments that make sense when included inside a longer clip.
+- Avoid random or meaningless sentences.
+- Do not invent timestamps.
+- Timestamps must be inside the transcript.
+- Return between 1 and 5 strong moments.
+- Each moment should normally be only a few seconds long.
+- "start" and "end" identify the interesting moment, NOT the final clip.
 
-- Return EXACTLY 3 to 5 clips when enough good moments exist.
-- NEVER return more than 5 clips.
-- Every clip MUST be between 15 and 60 seconds long.
-- Use ONLY timestamps that exist in the transcript.
-- Do NOT invent events, dialogue, or timestamps.
-- Prefer humor, surprise, conflict, emotion, interesting statements,
-  strong opinions, reactions, useful information, or strong hooks.
-- Avoid boring introductions, greetings, silence, and unnecessary setup.
-- Each clip should make sense when watched by itself.
-- Choose strong beginnings and endings.
-- Do not create multiple nearly identical clips.
+Return ONLY valid JSON.
 
-RETURN ONLY VALID JSON.
+Required format:
 
-Use EXACTLY this format:
+{{
+  "clips": [
+    {{
+      "start": 26.4,
+      "end": 29.6,
+      "title": "Countdown",
+      "hook": "The moment before the big event",
+      "reason": "Builds suspense and makes viewers want to see what happens"
+    }}
+  ]
+}}
+
+TRANSCRIPT:
+
+{transcript}
+""".strip()
+
+
+def build_fallback_prompt(segments: list[dict[str, Any]]) -> str:
+    transcript_lines = []
+
+    for segment in segments:
+        start = _segment_start(segment)
+        end = _segment_end(segment)
+        text = _segment_text(segment)
+
+        if not text:
+            continue
+
+        transcript_lines.append(
+            f"[{start:.2f} - {end:.2f}] {text}"
+        )
+
+    transcript = "\n".join(transcript_lines)
+
+    return f"""
+Find up to 5 interesting moments in this video transcript.
+
+Pick moments that are:
+- funny
+- emotional
+- surprising
+- useful
+- dramatic
+- controversial
+- strong story moments
+
+Only return JSON.
+
+Do not try to make a 15-60 second clip.
+Just return the short interesting moment.
+
+Format:
 
 {{
   "clips": [
     {{
       "start": 10.0,
-      "end": 35.0,
-      "title": "Short descriptive title",
-      "hook": "A short hook describing why someone would keep watching",
-      "reason": "Why this moment works well as a short clip"
+      "end": 14.0,
+      "title": "Short title",
+      "hook": "Interesting hook",
+      "reason": "Why this moment is interesting"
     }}
   ]
 }}
 
-Do not write anything before or after the JSON.
+Use only timestamps that exist in the transcript.
 
-Transcript:
+TRANSCRIPT:
 
 {transcript}
-"""
+""".strip()
 
 
-def validate_clip(clip):
-    """
-    Validate and normalize one AI-generated clip.
-    Returns None when the clip is invalid.
-    """
+# ============================================================
+# OLLAMA
+# ============================================================
 
-    if not isinstance(clip, dict):
-        return None
-
-    try:
-        start = float(clip.get("start"))
-        end = float(clip.get("end"))
-    except (TypeError, ValueError):
-        return None
-
-    if not start >= 0:
-        return None
-
-    if not end > start:
-        return None
-
-    duration = end - start
-
-    # Shorts should generally be 15-60 seconds.
-    if duration < 15:
-        return None
-
-    if duration > 60:
-        return None
-
-    title = str(
-        clip.get("title")
-        or clip.get("name")
-        or "AI Suggested Clip"
-    ).strip()
-
-    hook = str(
-        clip.get("hook")
-        or clip.get("description")
-        or ""
-    ).strip()
-
-    reason = str(
-        clip.get("reason")
-        or clip.get("explanation")
-        or ""
-    ).strip()
-
-    return {
-        "start": round(start, 2),
-        "end": round(end, 2),
-        "title": title,
-        "hook": hook,
-        "reason": reason,
-    }
-
-
-def parse_ollama_response(response_text):
-    """
-    Parse Ollama's JSON response safely.
-
-    Ollama normally returns a JSON string inside:
-        result["response"]
-
-    We support:
-        {"clips": [...]}
-        [...]
-        {"result": {"clips": [...]}}
-    """
-
-    if not response_text:
-        raise ValueError("Ollama returned an empty response.")
-
-    try:
-        data = json.loads(response_text)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Ollama returned invalid JSON: {exc}"
-        ) from exc
-
-    clips = []
-
-    if isinstance(data, list):
-        clips = data
-
-    elif isinstance(data, dict):
-        if isinstance(data.get("clips"), list):
-            clips = data["clips"]
-
-        elif isinstance(data.get("result"), dict):
-            if isinstance(data["result"].get("clips"), list):
-                clips = data["result"]["clips"]
-
-    if not isinstance(clips, list):
-        raise ValueError(
-            "Ollama JSON did not contain a valid 'clips' array."
-        )
-
-    valid_clips = []
-
-    for clip in clips:
-        normalized = validate_clip(clip)
-
-        if normalized is not None:
-            valid_clips.append(normalized)
-
-    # Never allow more than the requested maximum.
-    return valid_clips[:MAX_CLIPS_PER_CHUNK]
-
-
-def call_ollama(transcript_segments):
-    """
-    Send one transcript chunk to Ollama.
-    """
-
-    prompt = build_prompt(transcript_segments)
-
+def call_ollama(prompt: str) -> str:
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
@@ -214,219 +198,479 @@ def call_ollama(transcript_segments):
         },
     }
 
-    request = urllib.request.Request(
+    response = requests.post(
         f"{OLLAMA_URL}/api/generate",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
+        json=payload,
+        timeout=300,
     )
 
-    with urllib.request.urlopen(
-        request,
-        timeout=300,
-    ) as response:
-        raw_response = response.read().decode("utf-8")
+    response.raise_for_status()
+
+    data = response.json()
+
+    response_text = data.get("response", "")
+
+    print("[Ollama] Raw model response:")
+    print(response_text)
+
+    return response_text
+
+
+# ============================================================
+# JSON PARSING
+# ============================================================
+
+def clean_json_text(text: str) -> str:
+    text = text.strip()
+
+    # Remove markdown code fences if model adds them
+    text = re.sub(r"^```json\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^```\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+
+    return text.strip()
+
+
+def parse_ollama_response(response_text: str) -> list[dict[str, Any]]:
+    if not response_text:
+        return []
+
+    response_text = clean_json_text(response_text)
 
     try:
-        result = json.loads(raw_response)
+        data = json.loads(response_text)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            "Ollama HTTP response was not valid JSON."
-        ) from exc
+        print(f"[Ollama] JSON parse error: {exc}")
+        return []
 
-    if not isinstance(result, dict):
-        raise ValueError(
-            "Ollama returned an unexpected response format."
-        )
+    if isinstance(data, list):
+        clips = data
 
-    if "error" in result:
-        raise RuntimeError(
-            f"Ollama error: {result['error']}"
-        )
+    elif isinstance(data, dict):
+        if isinstance(data.get("clips"), list):
+            clips = data["clips"]
 
-    response_text = result.get("response")
+        elif isinstance(data.get("result"), dict):
+            clips = data["result"].get("clips", [])
 
-    if not response_text:
-        raise ValueError(
-            "Ollama response did not contain a 'response' field."
-        )
+        else:
+            clips = []
 
-    return parse_ollama_response(response_text)
+    else:
+        clips = []
+
+    if not isinstance(clips, list):
+        return []
+
+    return clips
 
 
-def analyze_chunk_with_retry(
-    chunk,
-    chunk_number,
-    total_chunks,
-):
-    """
-    Analyze one chunk with retries.
-    """
+# ============================================================
+# VALIDATE AI MOMENT
+# ============================================================
 
-    last_error = None
+def validate_ai_moment(
+    clip: dict[str, Any],
+    transcript_duration: float,
+) -> bool:
 
-    for attempt in range(1, MAX_RETRIES + 2):
+    if not isinstance(clip, dict):
+        return False
+
+    try:
+        start = float(clip["start"])
+        end = float(clip["end"])
+    except (KeyError, TypeError, ValueError):
+        return False
+
+    if start < 0:
+        return False
+
+    if end <= start:
+        return False
+
+    if start >= transcript_duration:
+        return False
+
+    if end > transcript_duration:
+        return False
+
+    # AI moment itself should not be absurdly long.
+    # We intentionally allow short moments.
+    moment_duration = end - start
+
+    if moment_duration <= 0:
+        return False
+
+    if moment_duration > 30:
+        return False
+
+    return True
+
+
+# ============================================================
+# EXPAND AI MOMENT INTO REAL CLIP
+# ============================================================
+
+def expand_clip(
+    clip: dict[str, Any],
+    video_duration: float,
+) -> dict[str, Any] | None:
+
+    try:
+        moment_start = float(clip["start"])
+        moment_end = float(clip["end"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    if video_duration <= 0:
+        return None
+
+    if moment_start < 0:
+        moment_start = 0.0
+
+    if moment_end > video_duration:
+        moment_end = video_duration
+
+    if moment_end <= moment_start:
+        return None
+
+    moment_duration = moment_end - moment_start
+
+    # ========================================================
+    # CASE 1:
+    # Video is shorter than minimum clip length
+    # ========================================================
+
+    if video_duration < MIN_CLIP_DURATION:
+        final_start = 0.0
+        final_end = video_duration
+
+    # ========================================================
+    # CASE 2:
+    # Video is between 15 and 60 seconds
+    # ========================================================
+
+    elif video_duration <= MAX_CLIP_DURATION:
+        final_start = 0.0
+        final_end = video_duration
+
+    # ========================================================
+    # CASE 3:
+    # Normal video > 60 seconds
+    # ========================================================
+
+    else:
+        target_duration = DEFAULT_CLIP_DURATION
+
+        # Put the interesting moment roughly in the middle.
+        moment_center = (moment_start + moment_end) / 2.0
+
+        final_start = moment_center - target_duration / 2.0
+        final_end = final_start + target_duration
+
+        # Keep inside video
+        if final_start < 0:
+            final_start = 0.0
+            final_end = target_duration
+
+        if final_end > video_duration:
+            final_end = video_duration
+            final_start = video_duration - target_duration
+
+        # Safety
+        final_start = max(0.0, final_start)
+        final_end = min(video_duration, final_end)
+
+    duration = final_end - final_start
+
+    # ========================================================
+    # Final duration validation
+    # ========================================================
+
+    if duration < MIN_CLIP_DURATION:
+        return None
+
+    if duration > MAX_CLIP_DURATION:
+        final_end = final_start + MAX_CLIP_DURATION
+
+        if final_end > video_duration:
+            final_end = video_duration
+            final_start = max(
+                0.0,
+                final_end - MAX_CLIP_DURATION
+            )
+
+        duration = final_end - final_start
+
+    result = dict(clip)
+
+    result["start"] = round(final_start, 2)
+    result["end"] = round(final_end, 2)
+    result["duration"] = round(duration, 2)
+
+    return result
+
+
+# ============================================================
+# REMOVE DUPLICATES / HEAVY OVERLAPS
+# ============================================================
+
+def deduplicate_clips(
+    clips: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+
+    if not clips:
+        return []
+
+    # Sort by start
+    clips = sorted(
+        clips,
+        key=lambda x: float(x.get("start", 0))
+    )
+
+    result = []
+
+    for clip in clips:
+        try:
+            start = float(clip["start"])
+            end = float(clip["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        duplicate = False
+
+        for existing in result:
+            existing_start = float(existing["start"])
+            existing_end = float(existing["end"])
+
+            overlap_start = max(start, existing_start)
+            overlap_end = min(end, existing_end)
+
+            overlap = max(0.0, overlap_end - overlap_start)
+
+            shorter_duration = min(
+                end - start,
+                existing_end - existing_start
+            )
+
+            if shorter_duration > 0:
+                overlap_ratio = overlap / shorter_duration
+
+                if overlap_ratio >= 0.70:
+                    duplicate = True
+                    break
+
+        if not duplicate:
+            result.append(clip)
+
+    return result
+
+
+# ============================================================
+# ANALYZE ONE CHUNK
+# ============================================================
+
+def analyze_chunk(
+    segments: list[dict[str, Any]],
+    video_duration: float,
+) -> list[dict[str, Any]]:
+
+    prompt = build_prompt(segments)
+
+    for attempt in range(MAX_RETRIES + 1):
+
         print(
-            f"[Ollama] Chunk "
-            f"{chunk_number}/{total_chunks} "
-            f"attempt {attempt}/{MAX_RETRIES + 1}"
+            f"[Ollama] Analysis attempt "
+            f"{attempt + 1}/{MAX_RETRIES + 1}"
         )
 
         try:
-            clips = call_ollama(chunk)
+            response_text = call_ollama(prompt)
+
+            ai_clips = parse_ollama_response(response_text)
+
+            valid_moments = []
+
+            for clip in ai_clips:
+
+                if validate_ai_moment(
+                    clip,
+                    video_duration,
+                ):
+                    valid_moments.append(clip)
+                else:
+                    print(
+                        "[Ollama] Rejected invalid AI moment:"
+                    )
+                    print(clip)
+
+            if valid_moments:
+                final_clips = []
+
+                for clip in valid_moments:
+
+                    expanded = expand_clip(
+                        clip,
+                        video_duration,
+                    )
+
+                    if expanded:
+                        final_clips.append(expanded)
+
+                final_clips = deduplicate_clips(
+                    final_clips
+                )
+
+                return final_clips[:MAX_CLIPS_PER_CHUNK]
+
+            # =================================================
+            # FALLBACK
+            # =================================================
 
             print(
-                f"[Ollama] Chunk "
-                f"{chunk_number}/{total_chunks} returned "
-                f"{len(clips)} valid clips"
+                "[Ollama] No valid moments returned. "
+                "Trying fallback prompt."
             )
 
-            return clips
+            fallback_prompt = build_fallback_prompt(
+                segments
+            )
 
-        except (
-            urllib.error.URLError,
-            urllib.error.HTTPError,
-            TimeoutError,
-            ValueError,
-            RuntimeError,
-            json.JSONDecodeError,
-        ) as exc:
+            fallback_response = call_ollama(
+                fallback_prompt
+            )
 
-            last_error = exc
+            fallback_clips = parse_ollama_response(
+                fallback_response
+            )
+
+            valid_fallback = []
+
+            for clip in fallback_clips:
+
+                if validate_ai_moment(
+                    clip,
+                    video_duration,
+                ):
+                    expanded = expand_clip(
+                        clip,
+                        video_duration,
+                    )
+
+                    if expanded:
+                        valid_fallback.append(
+                            expanded
+                        )
+
+            valid_fallback = deduplicate_clips(
+                valid_fallback
+            )
+
+            if valid_fallback:
+                print(
+                    f"[Ollama] Fallback returned "
+                    f"{len(valid_fallback)} clips"
+                )
+
+                return valid_fallback[
+                    :MAX_CLIPS_PER_CHUNK
+                ]
 
             print(
-                f"[Ollama] Chunk "
-                f"{chunk_number}/{total_chunks} failed: "
-                f"{exc}"
+                "[Ollama] Fallback returned "
+                "0 valid clips"
             )
 
-            if attempt <= MAX_RETRIES:
-                time.sleep(1)
-
-    print(
-        f"[Ollama] Chunk "
-        f"{chunk_number}/{total_chunks} failed after "
-        f"{MAX_RETRIES + 1} attempts."
-    )
+        except Exception as exc:
+            print(
+                f"[Ollama] Attempt failed: {exc}"
+            )
 
     return []
 
 
-def remove_duplicate_clips(clips):
-    """
-    Remove clips that have almost identical timestamps.
-    """
+# ============================================================
+# MAIN ANALYSIS FUNCTION
+# ============================================================
 
-    unique_clips = []
+def analyze_transcript(
+    segments: list[dict[str, Any]]
+) -> dict[str, Any]:
 
-    for clip in clips:
-        duplicate = False
-
-        for existing in unique_clips:
-            start_difference = abs(
-                float(clip["start"])
-                - float(existing["start"])
-            )
-
-            end_difference = abs(
-                float(clip["end"])
-                - float(existing["end"])
-            )
-
-            if (
-                start_difference < 3
-                and end_difference < 3
-            ):
-                duplicate = True
-                break
-
-        if not duplicate:
-            unique_clips.append(clip)
-
-    return unique_clips
-
-
-def analyze_transcript(transcript_segments):
-    """
-    Analyze the complete transcript in multiple chunks.
-
-    Returns:
-
-    {
-        "clips": [...]
-    }
-    """
-
-    if not transcript_segments:
-        raise ValueError(
-            "Transcript contains no segments."
+    if not segments:
+        raise RuntimeError(
+            "No transcript segments available."
         )
 
-    total_segments = len(transcript_segments)
+    video_duration = get_transcript_duration(
+        segments
+    )
+
+    if video_duration <= 0:
+        raise RuntimeError(
+            "Could not determine video duration."
+        )
 
     print(
-        f"[Ollama] Starting transcript analysis: "
-        f"{total_segments} segments"
+        f"[Ollama] Starting analysis. "
+        f"Transcript duration: {video_duration:.2f}s"
     )
+
+    # ========================================================
+    # CHUNK TRANSCRIPT
+    # ========================================================
+
+    chunks = [
+        segments[i:i + MAX_SEGMENTS_PER_CHUNK]
+        for i in range(
+            0,
+            len(segments),
+            MAX_SEGMENTS_PER_CHUNK
+        )
+    ]
 
     all_clips = []
 
-    total_chunks = (
-        total_segments + MAX_SEGMENTS_PER_CHUNK - 1
-    ) // MAX_SEGMENTS_PER_CHUNK
-
-    for i in range(
-        0,
-        total_segments,
-        MAX_SEGMENTS_PER_CHUNK,
-    ):
-        chunk = transcript_segments[
-            i:i + MAX_SEGMENTS_PER_CHUNK
-        ]
-
-        chunk_number = (
-            i // MAX_SEGMENTS_PER_CHUNK
-        ) + 1
+    for index, chunk in enumerate(chunks):
 
         print(
             f"[Ollama] Processing chunk "
-            f"{chunk_number}/{total_chunks} "
-            f"with {len(chunk)} transcript segments"
+            f"{index + 1}/{len(chunks)}"
         )
 
-        clips = analyze_chunk_with_retry(
+        chunk_clips = analyze_chunk(
             chunk,
-            chunk_number,
-            total_chunks,
+            video_duration,
         )
 
-        all_clips.extend(clips)
+        print(
+            f"[Ollama] Chunk {index + 1}/"
+            f"{len(chunks)} returned "
+            f"{len(chunk_clips)} valid clips"
+        )
 
-    # Remove duplicate suggestions.
-    unique_clips = remove_duplicate_clips(
+        all_clips.extend(chunk_clips)
+
+    # ========================================================
+    # FINAL DEDUPLICATION
+    # ========================================================
+
+    final_clips = deduplicate_clips(
         all_clips
     )
 
-    # Final validation.
-    final_clips = []
-
-    for clip in unique_clips:
-        normalized = validate_clip(clip)
-
-        if normalized is not None:
-            final_clips.append(normalized)
+    # Sort by start time
+    final_clips = sorted(
+        final_clips,
+        key=lambda x: float(x["start"])
+    )
 
     print(
         f"[Ollama] Analysis complete. "
         f"Found {len(final_clips)} valid unique clips."
     )
 
-    # IMPORTANT:
-    # Do not silently pretend that analysis succeeded
-    # when Ollama produced absolutely nothing.
     if not final_clips:
         raise RuntimeError(
             "Ollama completed, but no valid clips were generated."

@@ -711,7 +711,31 @@ def create_clip(
     )
 
     clip_id = str(uuid4())
-    output_filename = f"{clip_id}.mp4"
+
+    video_title = Path(video.filename).stem
+    
+    safe_title = "".join(
+        c for c in video_title
+        if c.isalnum() or c in (" ", "-", "_", "(", ")")
+    ).strip()
+
+    if not safe_title:
+        safe_title = "ClipForge Video"
+
+    existing_clip_count = (
+        db.query(Clip)
+        .filter(
+            Clip.video_id == video_id,
+            Clip.project_id == project_id,
+        )
+        .count()
+    )
+
+    clip_number = existing_clip_count + 1
+
+    output_filename = (
+        f"{safe_title} - Clip {clip_number}.mp4"
+    )
 
     output_path = clips_dir / output_filename
 

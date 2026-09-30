@@ -5,3 +5,4 @@ psycopg[binary]
 alembic
 python-multipart
 faster-whisper
+requests
